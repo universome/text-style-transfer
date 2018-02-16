@@ -106,4 +106,4 @@ venv.bak/
 
 # Custom ignores
 data/
-
+ext-libs/
