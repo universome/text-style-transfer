@@ -8,7 +8,7 @@ class Vocab:
     It should be saved with pickle.dump
     Here's a tour to what it does: http://bit.ly/2BDupuH
     """
-    _default_tokens = ("__BOS__", "__EOS__", "__UNK__")
+    _default_tokens = ("__BOS__", "__EOS__", "__UNK__", "__PAD__")
 
     def __init__(self, tokens):
         tokens = tuple(tokens)
@@ -21,6 +21,7 @@ class Vocab:
         self.bos = 0
         self.eos = 1
         self.unk = 2
+        self.pad = 3
 
     def __len__(self):
         return len(self.tokens)
