@@ -1,10 +1,14 @@
 ''' Define the Transformer model '''
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
+from torch.autograd import Variable
+from tqdm import tqdm
+
 import transformer.constants as Constants
 from transformer.modules import BottleLinear as Linear
 from transformer.layers import EncoderLayer, DecoderLayer
+from transformer.beam import Beam
 
 
 use_cuda = torch.cuda.is_available()
@@ -32,9 +36,9 @@ class Encoder(nn.Module):
             EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
 
-    def forward(self, src_seq, return_attns=False):
+    def forward(self, src_seq, embs=None, return_attns=False):
         # Word embedding look up
-        enc_input = self.src_word_emb(src_seq)
+        enc_input = embs(src_seq) if embs else self.src_word_emb(src_seq)
 
         # Position Encoding addition
         positions = get_positions_for_seqs(src_seq)
@@ -74,9 +78,9 @@ class Decoder(nn.Module):
             DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
 
-    def forward(self, tgt_seq, src_seq, enc_output, return_attns=False):
+    def forward(self, tgt_seq, src_seq, enc_output, embs=None, return_attns=False):
         # Word embedding look up
-        dec_input = self.tgt_word_emb(tgt_seq)
+        dec_input = embs(tgt_seq) if embs else self.tgt_word_emb(tgt_seq)
 
         # Position Encoding addition
         positions = get_positions_for_seqs(tgt_seq)
@@ -114,7 +118,7 @@ class Transformer(nn.Module):
     def __init__(
             self, n_src_vocab, n_tgt_vocab, n_max_seq, n_layers=6, n_head=8,
             d_word_vec=512, d_model=512, d_inner_hid=1024, d_k=64, d_v=64,
-            dropout=0.1, proj_share_weight=True, embs_share_weight=False, return_enc_out=False):
+            dropout=0.1, proj_share_weight=True, embs_share_weight=False):
 
         super(Transformer, self).__init__()
         self.encoder = Encoder(
@@ -125,10 +129,11 @@ class Transformer(nn.Module):
             n_tgt_vocab, n_max_seq, n_layers=n_layers, n_head=n_head,
             d_word_vec=d_word_vec, d_model=d_model,
             d_inner_hid=d_inner_hid, dropout=dropout)
+        self.src_word_proj = Linear(d_model, n_src_vocab, bias=False)
         self.tgt_word_proj = Linear(d_model, n_tgt_vocab, bias=False)
         self.dropout = nn.Dropout(dropout)
-        self.return_enc_out = return_enc_out
         self.d_model = d_model
+        self.prob_projection = nn.LogSoftmax()
 
         assert d_model == d_word_vec, \
         'To facilitate the residual connections, \
@@ -137,6 +142,7 @@ class Transformer(nn.Module):
         if proj_share_weight:
             # Share the weight matrix between tgt word embedding/projection
             assert d_model == d_word_vec
+            self.src_word_proj.weight = self.encoder.src_word_emb.weight
             self.tgt_word_proj.weight = self.decoder.tgt_word_emb.weight
 
         if embs_share_weight:
@@ -153,31 +159,45 @@ class Transformer(nn.Module):
         freezed_param_ids = enc_freezed_param_ids | dec_freezed_param_ids
         return (p for p in self.parameters() if id(p) not in freezed_param_ids)
 
-    def forward(self, src, trg):
+    def forward(self, src, trg, use_trg_embs_in_encoder=False, use_src_embs_in_decoder=False, return_encodings=False):
         trg = trg[:, :-1]
 
-        enc_output, *_ = self.encoder(src)
-        dec_output, *_ = self.decoder(trg, src_seq, enc_output)
-        seq_logit = self.tgt_word_proj(dec_output)
+        if use_trg_embs_in_encoder:
+            enc_output, *_ = self.encoder(src, self.decoder.tgt_word_emb)
+        else:
+            enc_output, *_ = self.encoder(src)
+
+        if use_src_embs_in_decoder:
+            dec_output, *_ = self.decoder(trg, src, enc_output, self.encoder.src_word_emb)
+            seq_logit = self.src_word_proj(dec_output)
+        else:
+            dec_output, *_ = self.decoder(trg, src, enc_output)
+            seq_logit = self.tgt_word_proj(dec_output)
 
         out = seq_logit.view(-1, seq_logit.size(2))
 
-        return out if self.return_enc_out else out, enc_out
+        return (out, enc_output) if return_encodings else out
 
-    def translate_batch(self, src_seq, beam_size=6, max_len=200, n_best=1):
+
+    def translate_batch(self, src_seq, use_src_embs_in_decoder=False, use_trg_embs_in_encoder=False, beam_size=6, max_len=200, n_best=1):
         # Batch size is in different location depending on data.
         batch_size = src_seq.size(0)
 
         #- Enocde
-        enc_output, *_ = self.encoder(src_seq)
+        if use_trg_embs_in_encoder:
+            enc_output, *_ = self.encoder(src_seq, self.decoder.tgt_word_emb)
+        else:
+            enc_output, *_ = self.encoder(src_seq)
 
-        #--- Repeat data for beam
+        # Repeat data for beam
+        # We call clone here because there is a bug,
+        # which is fixed but not released yet (issue 4054)
         src_seq = Variable(
-            src_seq.data.repeat(1, beam_size).view(
+            src_seq.data.clone().repeat(1, beam_size).view(
                 src_seq.size(0) * beam_size, src_seq.size(1)))
 
         enc_output = Variable(
-            enc_output.data.repeat(1, beam_size, 1).view(
+            enc_output.data.clone().repeat(1, beam_size, 1).view(
                 enc_output.size(0) * beam_size, enc_output.size(1), enc_output.size(2)))
 
         #--- Prepare beams
@@ -187,7 +207,7 @@ class Transformer(nn.Module):
         n_remaining_sents = batch_size
 
         #- Decode
-        for i in range(max_len):
+        for i in tqdm(range(max_len)):
             len_dec_seq = i + 1
 
             # -- Preparing decoded data seq -- #
@@ -201,9 +221,18 @@ class Transformer(nn.Module):
             if use_cuda: dec_partial_seq = dec_partial_seq.cuda()
 
             # -- Decoding -- #
-            dec_output, *_ = self.decoder(dec_partial_seq, src_seq, enc_output)
+            if use_src_embs_in_decoder:
+                dec_output, *_ = self.decoder(dec_partial_seq, src_seq, enc_output, self.encoder.src_word_emb)
+            else:
+                dec_output, *_ = self.decoder(dec_partial_seq, src_seq, enc_output)
+
             dec_output = dec_output[:, -1, :] # (batch * beam) * d_model
-            dec_output = self.tgt_word_proj(dec_output)
+
+            if use_src_embs_in_decoder:
+                dec_output = self.src_word_proj(dec_output)
+            else:
+                dec_output = self.tgt_word_proj(dec_output)
+
             out = self.prob_projection(dec_output)
 
             # batch x beam x n_words
@@ -317,8 +346,12 @@ def get_attn_subsequent_mask(seq):
 
 
 def get_positions_for_seq(seq):
-    return [i+1 if token != Constants.PAD else 0 for i, token in enumerate(seq)]
+    return [i+1 if token != Constants.PAD else 0 for i, token in enumerate(seq.data)]
 
 
 def get_positions_for_seqs(seqs):
-    return np.array([get_positions_for_seq(seq) for seq in seqs])
+    positions = [get_positions_for_seq(seq) for seq in seqs]
+    positions = Variable(torch.LongTensor(positions))
+    if use_cuda: positions = positions.cuda()
+
+    return positions

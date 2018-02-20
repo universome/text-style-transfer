@@ -73,15 +73,12 @@ class UMTBatcher(object):
             trg_noised = seq_noise_many(trg)
 
             # This is the main data for DAE
-            inputs = pad_to_longest(src_noised + trg_noised)
-            targets = pad_to_longest(src + trg)
+            src_noised = pad_to_longest(src_noised)
+            trg_noised = pad_to_longest(trg_noised)
+            src = pad_to_longest(src)
+            trg = pad_to_longest(trg)
 
-            # We should also generate targets for discriminator
-            domains = [0] * len(src) + [1] * len(trg)
-            domains = Variable(torch.ByteTensor(domains))
-            if use_cuda: domains = domains.cuda()
-
-            return inputs, targets, domains
+            return src_noised, trg_noised, src, trg
         else:
             # Whoa, we have done one epoch! That's cool. Let's reset.
             if self._should_shuffle: self.shuffle()
@@ -95,7 +92,7 @@ def pad_to_longest(seqs):
     max_len = max(len(seq) for seq in seqs)
 
     padded_seqs = np.array([seq + [constants.PAD] * (max_len - len(seq)) for seq in seqs])
-    padded_seqs = Variable(torch.IntTensor(padded_seq))
+    padded_seqs = Variable(torch.LongTensor(padded_seqs))
 
     if use_cuda: padded_seqs = padded_seqs.cuda()
 
