@@ -1,4 +1,3 @@
-''' Data Loader class for training iteration '''
 import random
 import numpy as np
 import torch
@@ -8,8 +7,6 @@ import transformer.constants as constants
 use_cuda = torch.cuda.is_available()
 
 class Batcher(object):
-    ''' For data iteration '''
-
     def __init__(
             self, src_insts, tgt_insts, src_word2idx, tgt_word2idx,
             batch_size=64, shuffle=False, test=False):
@@ -99,17 +96,17 @@ class Batcher(object):
     def next(self):
         ''' Get the next batch '''
 
-        def pad_to_longest(insts):
+        def pad_to_longest(sentences):
             ''' Pad the instance to the max seq length in batch '''
 
-            max_len = max(len(inst) for inst in insts)
+            max_len = max(len(sentence) for sentence in sentences)
 
             inst_data = np.array([
                 inst + [constants.PAD] * (max_len - len(inst))
-                for inst in insts])
+                for inst in sentences])
 
             inst_position = np.array([
-                [pos_i+1 if w_i != constants.PAD else 0 for pos_i, w_i in enumerate(inst)]
+                [i+1 if token != constants.PAD else 0 for i, token in enumerate(inst)]
                 for inst in inst_data])
 
 
