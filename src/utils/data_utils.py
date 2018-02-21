@@ -9,13 +9,12 @@ use_cuda = torch.cuda.is_available()
 class Batcher(object):
     def __init__(
             self, src_insts, tgt_insts, src_word2idx, tgt_word2idx,
-            batch_size=64, shuffle=False, test=False):
+            batch_size=64, shuffle=False):
 
         assert batch_size > 0
         assert len(src_insts) >= batch_size
         assert len(src_insts) == len(tgt_insts)
 
-        self.test = test
         self._n_batch = int(np.ceil(len(src_insts) / batch_size))
 
         self._batch_size = batch_size
@@ -94,33 +93,6 @@ class Batcher(object):
         return self._n_batch
 
     def next(self):
-        ''' Get the next batch '''
-
-        def pad_to_longest(sentences):
-            ''' Pad the instance to the max seq length in batch '''
-
-            max_len = max(len(sentence) for sentence in sentences)
-
-            inst_data = np.array([
-                inst + [constants.PAD] * (max_len - len(inst))
-                for inst in sentences])
-
-            inst_position = np.array([
-                [i+1 if token != constants.PAD else 0 for i, token in enumerate(inst)]
-                for inst in inst_data])
-
-
-            inst_data_tensor = Variable(
-                torch.LongTensor(inst_data), volatile=self.test)
-            inst_position_tensor = Variable(
-                torch.LongTensor(inst_position), volatile=self.test)
-
-            if use_cuda:
-                inst_data_tensor = inst_data_tensor.cuda()
-                inst_position_tensor = inst_position_tensor.cuda()
-
-            return inst_data_tensor, inst_position_tensor
-
         if self._iter_count < self._n_batch:
             batch_idx = self._iter_count
             self._iter_count += 1
@@ -129,19 +101,25 @@ class Batcher(object):
             end_idx = (batch_idx + 1) * self._batch_size
 
             src_insts = self._src_insts[start_idx:end_idx]
-            src_data, src_pos = pad_to_longest(src_insts)
+            src_data = pad_to_longest(src_insts)
 
-            if not self._tgt_insts:
-                return src_data, src_pos
-            else:
-                tgt_insts = self._tgt_insts[start_idx:end_idx]
-                tgt_data, tgt_pos = pad_to_longest(tgt_insts)
-                return (src_data, src_pos), (tgt_data, tgt_pos)
+            tgt_insts = self._tgt_insts[start_idx:end_idx]
+            tgt_data = pad_to_longest(tgt_insts)
 
+            return src_data, tgt_data
         else:
-
             if self._need_shuffle:
                 self.shuffle()
 
             self._iter_count = 0
             raise StopIteration()
+
+def pad_to_longest(sentences):
+    ''' Pad the instance to the max seq length in batch '''
+    max_len = max(len(sentence) for sentence in sentences)
+    seqs = np.array([seq + [constants.PAD] * (max_len - len(seq)) for seq in sentences])
+    seqs = Variable(torch.LongTensor(seqs))
+
+    if use_cuda: seqs = seqs.cuda()
+
+    return seqs

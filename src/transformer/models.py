@@ -133,7 +133,7 @@ class Transformer(nn.Module):
         self.tgt_word_proj = Linear(d_model, n_tgt_vocab, bias=False)
         self.dropout = nn.Dropout(dropout)
         self.d_model = d_model
-        self.prob_projection = nn.LogSoftmax()
+        self.prob_projection = nn.LogSoftmax(dim=1)
 
         assert d_model == d_word_vec, \
         'To facilitate the residual connections, \
@@ -179,7 +179,7 @@ class Transformer(nn.Module):
         return (out, enc_output) if return_encodings else out
 
 
-    def translate_batch(self, src_seq, use_src_embs_in_decoder=False, use_trg_embs_in_encoder=False, beam_size=6, max_len=200, n_best=1):
+    def translate_batch(self, src_seq, use_src_embs_in_decoder=False, use_trg_embs_in_encoder=False, beam_size=6, max_len=200):
         # Batch size is in different location depending on data.
         batch_size = src_seq.size(0)
 
@@ -293,17 +293,15 @@ class Transformer(nn.Module):
             #- update the remaining size
             n_remaining_sents = len(active_seq_idxs)
 
-        #- Return useful information
-        all_hyp, all_scores = [], []
+        #- Return translations
+        translations = []
 
-        for beam_idx in range(batch_size):
-            scores, tail_idxs = beams[beam_idx].sort_scores()
-            all_scores += [scores[:n_best]]
+        for i in range(batch_size):
+            beams[i].sort_scores()
+            translation = beams[i].get_hypothesis(0) # Best hypothesis lies at index 0
+            translations.append(translation)
 
-            hyps = [beams[beam_idx].get_hypothesis(i) for i in tail_idxs[:n_best]]
-            all_hyp += [hyps]
-
-        return all_hyp, all_scores
+        return translations
 
 
 def position_encoding_init(max_len, dim):
