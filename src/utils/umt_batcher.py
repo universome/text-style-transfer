@@ -1,8 +1,11 @@
 import random
+
 import numpy as np
 import torch
 from torch.autograd import Variable
+
 from src.seq_noise import seq_noise_many
+from src.utils.data_utils import pad_to_longest
 import transformer.constants as constants
 
 use_cuda = torch.cuda.is_available()
@@ -85,15 +88,3 @@ class UMTBatcher(object):
             self._iter_count = 0
 
             raise StopIteration()
-
-
-def pad_to_longest(seqs):
-    ''' Pads the instance to the max seq length in batch '''
-    max_len = max(len(seq) for seq in seqs)
-
-    padded_seqs = np.array([seq + [constants.PAD] * (max_len - len(seq)) for seq in seqs])
-    padded_seqs = Variable(torch.LongTensor(padded_seqs))
-
-    if use_cuda: padded_seqs = padded_seqs.cuda()
-
-    return padded_seqs

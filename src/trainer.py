@@ -1,270 +1,232 @@
-class Trainer:
-    '''
-    This script handling the training process.
-    '''
-    def __init__():
-        pass
-
-
-import argparse
-import math
-import time
-
-from tqdm import tqdm
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import transformer.сonstants as Constants
-from transformer.models import Transformer
-from transformer.optim import ScheduledOptim
-from DataLoader import DataLoader
+from torch.autograd import Variable
+from tqdm import tqdm
+import numpy as np
+from IPython.display import clear_output
+import matplotlib.pyplot as plt
+import pandas as pd
 
-def get_performance(crit, pred, gold, smoothing=False, num_class=None):
-    ''' Apply label smoothing if needed '''
+use_cuda = torch.cuda.is_available()
 
-    # TODO: Add smoothing
-    if smoothing:
-        assert bool(num_class)
-        eps = 0.1
-        gold = gold * (1 - eps) + (1 - gold) * eps / num_class
-        raise NotImplementedError
-
-    loss = crit(pred, gold.contiguous().view(-1))
-
-    pred = pred.max(1)[1]
-
-    gold = gold.contiguous().view(-1)
-    n_correct = pred.data.eq(gold.data)
-    n_correct = n_correct.masked_select(gold.ne(Constants.PAD).data).sum()
-
-    return loss, n_correct
-
-def train_epoch(model, training_data, crit, optimizer):
-    ''' Epoch operation in training phase'''
-
-    model.train()
-
-    total_loss = 0
-    n_total_words = 0
-    n_total_correct = 0
-
-    for batch in tqdm(
-            training_data, mininterval=2,
-            desc='  - (Training)   ', leave=False):
-
-        # prepare data
-        src, tgt = batch
-        gold = tgt[0][:, 1:]
-
-        # forward
-        optimizer.zero_grad()
-        pred = model(src, tgt)
-
-        # backward
-        loss, n_correct = get_performance(crit, pred, gold)
-        loss.backward()
-
-        # update parameters
-        optimizer.step()
-        optimizer.update_learning_rate()
-
-        # note keeping
-        n_words = gold.data.ne(Constants.PAD).sum()
-        n_total_words += n_words
-        n_total_correct += n_correct
-        total_loss += loss.data[0]
-
-    return total_loss/n_total_words, n_total_correct/n_total_words
-
-def eval_epoch(model, validation_data, crit):
-    ''' Epoch operation in evaluation phase '''
-
-    model.eval()
-
-    total_loss = 0
-    n_total_words = 0
-    n_total_correct = 0
-
-    for batch in tqdm(
-            validation_data, mininterval=2,
-            desc='  - (Validation) ', leave=False):
-
-        # prepare data
-        src, tgt = batch
-        gold = tgt[0][:, 1:]
-
-        # forward
-        pred = model(src, tgt)
-        loss, n_correct = get_performance(crit, pred, gold)
-
-        # note keeping
-        n_words = gold.data.ne(Constants.PAD).sum()
-        n_total_words += n_words
-        n_total_correct += n_correct
-        total_loss += loss.data[0]
-
-    return total_loss/n_total_words, n_total_correct/n_total_words
-
-def train(model, training_data, validation_data, crit, optimizer, opt):
-    ''' Start training '''
-
-    log_train_file = None
-    log_valid_file = None
-
-    if opt.log:
-        log_train_file = opt.log + '.train.log'
-        log_valid_file = opt.log + '.valid.log'
-
-        print('[Info] Training performance will be written to file: {} and {}'.format(
-            log_train_file, log_valid_file))
-
-        with open(log_train_file, 'w') as log_tf, open(log_valid_file, 'w') as log_vf:
-            log_tf.write('epoch,loss,ppl,accuracy\n')
-            log_vf.write('epoch,loss,ppl,accuracy\n')
-
-    valid_accus = []
-    for epoch_i in range(opt.epoch):
-        print('[ Epoch', epoch_i, ']')
-
-        start = time.time()
-        train_loss, train_accu = train_epoch(model, training_data, crit, optimizer)
-        print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
-              'elapse: {elapse:3.3f} min'.format(
-                  ppl=math.exp(min(train_loss, 100)), accu=100*train_accu,
-                  elapse=(time.time()-start)/60))
-
-        start = time.time()
-        valid_loss, valid_accu = eval_epoch(model, validation_data, crit)
-        print('  - (Validation) ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
-                'elapse: {elapse:3.3f} min'.format(
-                    ppl=math.exp(min(valid_loss, 100)), accu=100*valid_accu,
-                    elapse=(time.time()-start)/60))
-
-        valid_accus += [valid_accu]
-
-        model_state_dict = model.state_dict()
-        checkpoint = {
-            'model': model_state_dict,
-            'settings': opt,
-            'epoch': epoch_i}
-
-        if opt.save_model:
-            if opt.save_mode == 'all':
-                model_name = opt.save_model + '_accu_{accu:3.3f}.chkpt'.format(accu=100*valid_accu)
-                torch.save(checkpoint, model_name)
-            elif opt.save_mode == 'best':
-                model_name = opt.save_model + '.chkpt'
-                if valid_accu >= max(valid_accus):
-                    torch.save(checkpoint, model_name)
-                    print('    - [Info] The checkpoint file has been updated.')
-
-        if log_train_file and log_valid_file:
-            with open(log_train_file, 'a') as log_tf, open(log_valid_file, 'a') as log_vf:
-                log_tf.write('{epoch},{loss: 8.5f},{ppl: 8.5f},{accu:3.3f}\n'.format(
-                    epoch=epoch_i, loss=train_loss,
-                    ppl=math.exp(min(train_loss, 100)), accu=100*train_accu))
-                log_vf.write('{epoch},{loss: 8.5f},{ppl: 8.5f},{accu:3.3f}\n'.format(
-                    epoch=epoch_i, loss=valid_loss,
-                    ppl=math.exp(min(valid_loss, 100)), accu=100*valid_accu))
-
-def main():
-    ''' Main function '''
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument('-data', required=True)
-
-    parser.add_argument('-epoch', type=int, default=10)
-    parser.add_argument('-batch_size', type=int, default=64)
-
-    #parser.add_argument('-d_word_vec', type=int, default=512)
-    parser.add_argument('-d_model', type=int, default=512)
-    parser.add_argument('-d_inner_hid', type=int, default=1024)
-    parser.add_argument('-d_k', type=int, default=64)
-    parser.add_argument('-d_v', type=int, default=64)
-
-    parser.add_argument('-n_head', type=int, default=8)
-    parser.add_argument('-n_layers', type=int, default=6)
-    parser.add_argument('-n_warmup_steps', type=int, default=4000)
-
-    parser.add_argument('-dropout', type=float, default=0.1)
-    parser.add_argument('-embs_share_weight', action='store_true')
-    parser.add_argument('-proj_share_weight', action='store_true')
-
-    parser.add_argument('-log', default=None)
-    parser.add_argument('-save_model', default=None)
-    parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
-
-    parser.add_argument('-no_cuda', action='store_true')
-
-    opt = parser.parse_args()
-    opt.cuda = not opt.no_cuda
-    opt.d_word_vec = opt.d_model
-
-    #========= Loading Dataset =========#
-    data = torch.load(opt.data)
-    opt.max_token_seq_len = data['settings'].max_token_seq_len
-
-    #========= Preparing DataLoader =========#
-    training_data = DataLoader(
-        data['dict']['src'],
-        data['dict']['tgt'],
-        src_insts=data['train']['src'],
-        tgt_insts=data['train']['tgt'],
-        batch_size=opt.batch_size,
-        cuda=opt.cuda)
-
-    validation_data = DataLoader(
-        data['dict']['src'],
-        data['dict']['tgt'],
-        src_insts=data['valid']['src'],
-        tgt_insts=data['valid']['tgt'],
-        batch_size=opt.batch_size,
-        shuffle=False,
-        test=True,
-        cuda=opt.cuda)
-
-    opt.src_vocab_size = training_data.src_vocab_size
-    opt.tgt_vocab_size = training_data.tgt_vocab_size
-
-    #========= Preparing Model =========#
-    if opt.embs_share_weight and training_data.src_word2idx != training_data.tgt_word2idx:
-        print('[Warning]',
-              'The src/tgt word2idx table are different but asked to share word embedding.')
-
-    print(opt)
-
-    transformer = Transformer(
-        opt.src_vocab_size,
-        opt.tgt_vocab_size,
-        opt.max_token_seq_len,
-        proj_share_weight=opt.proj_share_weight,
-        embs_share_weight=opt.embs_share_weight,
-        d_k=opt.d_k,
-        d_v=opt.d_v,
-        d_model=opt.d_model,
-        d_word_vec=opt.d_word_vec,
-        d_inner_hid=opt.d_inner_hid,
-        n_layers=opt.n_layers,
-        n_head=opt.n_head,
-        dropout=opt.dropout)
-
-    optimizer = ScheduledOptim(
-        optim.Adam(
-            transformer.get_trainable_parameters(),
-            betas=(0.9, 0.98), eps=1e-09),
-        opt.d_model, opt.n_warmup_steps)
+LOSSES_TITLES = {
+    'ae_loss_src': '[src] lang AE loss',
+    'ae_loss_trg': '[trg] lang AE loss',
+    'loss_bt_src': '[src] lang back-translation loss',
+    'loss_bt_trg': '[trg] lang back-translation loss',
+    'discr_loss_src': '[src] lang discriminator loss',
+    'discr_loss_trg': '[trg] lang discriminator loss',
+    'gen_loss_src': '[src] lang generator loss',
+    'gen_loss_trg': '[trg] lang generator loss'
+}
 
 
-    def get_criterion(vocab_size):
-        ''' With PAD token zero weight '''
-        weight = torch.ones(vocab_size)
-        weight[Constants.PAD] = 0
-        return nn.CrossEntropyLoss(weight, size_average=False)
+class UMTTrainer:
+    def __init__(translator, discriminator,
+        translator_optimizer, dicsrriminator_optimizer, config):
 
-    crit = get_criterion(training_data.tgt_vocab_size)
+        self.translator = translator
+        self.discriminator = discriminator
+        self.translator = translator_optimizer
+        self.discriminator = discriminator_optimizer
 
-    if opt.cuda:
-        transformer = transformer.cuda()
-        crit = crit.cuda()
+        self.num_iters_done = 0
+        self.num_epochs_done = 0
+        self.max_num_epochs = config.get('max_num_epochs', 100)
+        self.start_bt_from_epoch = config.get('start_bt_from_epoch', 1)
 
-    train(transformer, training_data, validation_data, crit, optimizer, opt)
+        self.losses = {
+            'ae_loss_src': [],
+            'ae_loss_trg': [],
+            'loss_bt_src': [],
+            'loss_bt_trg': [],
+            'discr_loss_src': [],
+            'discr_loss_trg': [],
+            'gen_loss_src': [],
+            'gen_loss_trg': []
+        }
+
+    def run_training(training_data, visualize_losses=False):
+        should_continue = True
+
+        while self.num_epochs_done < self.max_num_epochs and should_continue:
+            for batch in tqdm(training_data, leave=False):
+                try:
+                    self.train_on_batch(batch)
+                    self.num_iters_done += 1
+                    if visualize_losses: self.visualize_losses()
+                except KeyboardInterrupt:
+                    should_continue = False
+                    break
+
+        self.num_epochs_done += 1
+
+    def train_on_batch(batch):
+        src_noised, trg_noised, src, trg = batch
+
+        # Resetting gradients
+        self.transformer_optimizer.zero_grad()
+        self.discriminator_optimizer.zero_grad()
+
+        should_backtranslate = self.num_epochs_done >= self.start_bt_from_epoch
+
+        encodings = self._train_ae(src_noised, trg_noised, src, trg)
+        if should_backtranslate: self._train_bt(src, trg)
+        domains_predictions = self._train_discriminator(*encodings)
+        self._train_generator(*domains_predictions)
+
+    def _train_ae(src_noised, trg_noised, src, trg):
+        ### Training autoencoder ###
+        self.translator.train()
+        # Computing translation for ~src->src and ~trg->trg autoencoding tasks
+        print('Training discriminator')
+        print('Computing predictions')
+        preds_src, encodings_src = self.translator(src_noised, src, return_encodings=True, use_src_embs_in_decoder=True)
+        preds_trg, encodings_trg = self.translator(trg_noised, trg, return_encodings=True, use_trg_embs_in_encoder=True)
+
+        print('Computing losses')
+        ae_loss_src = ae_criterion_src(preds_src, src[:, 1:].contiguous().view(-1))
+        ae_loss_trg = ae_criterion_trg(preds_trg, trg[:, 1:].contiguous().view(-1))
+
+        print('Computing gradients')
+        ae_loss_src.backward(retain_graph=True)
+        ae_loss_trg.backward(retain_graph=True)
+
+        self.losses['ae_loss_src'].append(ae_loss_src.data[0])
+        self.losses['ae_loss_trg'].append(ae_loss_trg.data[0])
+
+    def _train_bt(src, trg):
+        ### Training translator ###
+        print('Training translator')
+        self.translator.eval()
+        # Get translations for backtranslation
+        print('Computing back-translations')
+        bt_trg, *_ = self.translator.translate_batch(src, beam_size=2, max_len=10)
+        bt_src, *_ = self.translator.translate_batch(trg, use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True, beam_size=2, max_len=10)
+
+        bt_trg = Variable(torch.LongTensor(bt_trg))
+        bt_src = Variable(torch.LongTensor(bt_src))
+
+        # We are given n-best translations. Let's pick the best one
+        bt_trg = bt_trg[:,0,:]
+        bt_src = bt_src[:,0,:]
+
+        if use_cuda:
+            bt_trg = bt_trg.cuda()
+            bt_src = bt_src.cuda()
+
+        # Computing predictions for back-translated sentences
+        self.translator.train()
+        print('Computing predictions (translations of back-translations)')
+        bt_src_preds = self.translator(bt_trg, src, use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
+        bt_trg_preds = self.translator(bt_src, trg)
+
+        print('Computing losses')
+        loss_bt_src = translation_criterion_trg_to_src(bt_src_preds, src[:, 1:].contiguous().view(-1))
+        loss_bt_trg = translation_criterion_src_to_trg(bt_trg_preds, trg[:, 1:].contiguous().view(-1))
+
+        print('Computing gradients')
+        loss_bt_src.backward(retain_graph=True)
+        loss_bt_trg.backward(retain_graph=True)
+
+        print('Updating weights')
+        self.transformer_optimizer.step()
+
+        self.transformer_optimizer.zero_grad()
+
+        self.losses['loss_bt_src'].append(loss_bt_src.data[0])
+        self.losses['loss_bt_trg'].append(gen_loss_trg.data[0])
+
+    def _train_discriminator(encodings_src, encodings_trg):
+        ### Training discriminator ###
+        print('Training discriminator')
+        print('Computing predictions')
+        domains_preds_src = discriminator(encodings_src.view(-1, 512))
+        domains_preds_trg = discriminator(encodings_trg.view(-1, 512))
+
+        # Generating targets for discriminator
+        true_domains_src = Variable(torch.Tensor([0] * len(domains_preds_src)))
+        true_domains_trg = Variable(torch.Tensor([1] * len(domains_preds_trg)))
+
+        if use_cuda:
+            true_domains_src = true_domains_src.cuda()
+            true_domains_trg = true_domains_trg.cuda()
+
+        # True domains for discriminator loss
+        print('Computing losses')
+        discr_loss_src = adv_criterion(domains_preds_src, true_domains_src)
+        discr_loss_trg = adv_criterion(domains_preds_trg, true_domains_trg)
+
+        print('Computing gradients')
+        discr_loss_src.backward(retain_graph=True)
+        discr_loss_trg.backward(retain_graph=True)
+
+        print('Updating parameters')
+        self.discriminator_optimizer.step()
+
+        # Cleaning up gradients
+        self.transformer_optimizer.zero_grad()
+        self.discriminator_optimizer.zero_grad()
+
+        self.losses['discr_loss_src'].append(discr_loss_src.data[0])
+        self.losses['discr_loss_trg'].append(discr_loss_trg.data[0])
+
+        return domains_preds_src, domains_preds_trg
+
+    def _train_generator(domains_preds_src, domains_preds_trg):
+        src_noised, trg_noised, src, trg = batch
+
+        fake_domains_src = Variable(torch.Tensor([1] * len(domains_preds_src)))
+        fake_domains_trg = Variable(torch.Tensor([0] * len(domains_preds_trg)))
+
+        if use_cuda:
+            fake_domains_src = fake_domains_src.cuda()
+            fake_domains_trg = fake_domains_trg.cuda()
+
+        ### Training generator ###
+        print('Training generator')
+        print('Computing losses')
+        # Faking domains for generator loss
+        gen_loss_src = adv_criterion(domains_preds_src, fake_domains_src)
+        gen_loss_trg = adv_criterion(domains_preds_trg, fake_domains_trg)
+
+        print('Computing gradients')
+        gen_loss_src.backward(retain_graph=True)
+        gen_loss_trg.backward(retain_graph=True)
+
+        print('Updating parameters')
+        self.transformer_optimizer.step()
+
+        self.losses['gen_loss_src'].append(gen_loss_src.data[0])
+        self.losses['gen_loss_trg'].append(gen_loss_trg.data[0])
+
+    def visualize_losses():
+        clear_output(True)
+
+        losses_pairs = [
+            ('ae_loss_src', 'ae_loss_trg'),
+            ('loss_bt_src', 'loss_bt_trg'),
+            ('discr_loss_src', 'discr_loss_trg'),
+            ('gen_loss_src', 'gen_loss_trg')
+        ]
+
+        for src, trg in losses_pair:
+            if len(self.losses[src]) == 0 or len(self.losses[trg]) == 0:
+                continue
+
+            figure, axes = plt.subplots(2, sharey=True)
+            figure.set_figwidth(16)
+            figure.set_figheight(6)
+
+            plt.subplot(121)
+            plt.title(LOSSES_TITLES[src])
+            plt.plot(self.losses[src])
+            plt.plot(pd.DataFrame(self.losses[src]).ewm(span=50))
+            plt.grid()
+
+            plt.subplot(122)
+            plt.title(LOSSES_TITLES[trg])
+            plt.plot(self.losses[trg])
+            plt.plot(pd.DataFrame(self.losses[trg]).ewm(span=50))
+            plt.grid()
+
+        plt.show()
