@@ -13,7 +13,7 @@ use_cuda = torch.cuda.is_available()
 
 class UMTBatcher(object):
     def __init__(self, src, trg, vocab_src, vocab_trg,
-                 batch_size=32, shuffle=False):
+                 batch_size=32, shuffle=False, seq_noise_options={}):
         """
         This shuffler is supposed to be used for Unsupervised Machine Translation
         The logic here is different from normal batcher,
@@ -40,8 +40,9 @@ class UMTBatcher(object):
         self._vocab_trg = vocab_trg
 
         self._iter_count = 0
-
         self._should_shuffle = shuffle
+        self._seq_noise_options = seq_noise_options
+        
         if self._should_shuffle:
             self.shuffle()
 
@@ -72,8 +73,8 @@ class UMTBatcher(object):
             src = self._src[start_idx:end_idx]
             trg = self._trg[start_idx:end_idx]
 
-            src_noised = seq_noise_many(src)
-            trg_noised = seq_noise_many(trg)
+            src_noised = seq_noise_many(src, **self._seq_noise_options)
+            trg_noised = seq_noise_many(trg, **self._seq_noise_options)
 
             src = [[constants.BOS] + seq + [constants.EOS] for seq in src]
             trg = [[constants.BOS] + seq + [constants.EOS] for seq in trg]

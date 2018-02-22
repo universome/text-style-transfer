@@ -1,9 +1,9 @@
 import random
 
 
-def seq_noise(seq, dropout_p=0.1, shuffle_window=3):
+def seq_noise(seq, dropout_prob=0.1, shuffle_window=3):
     """Adds noise to a sequence"""
-    seq = seq_dropout(seq, dropout_p)
+    seq = seq_dropout(seq, dropout_prob)
 
     # TODO: can we replace it with just reversing?
     seq = gentle_shuffle(seq, shuffle_window)
