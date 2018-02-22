@@ -105,3 +105,11 @@ def compute_bleu(reference_corpus, translation_corpus, max_order=4,
     bleu = geo_mean * bp
 
     return (bleu, precisions, bp, ratio, translation_length, reference_length)
+
+
+def compute_bleu_for_sents(translations, targets, **kwargs):
+    translations_tok = [s.split() for s in translations]
+    targets_tok = [s.split() for s in targets]
+    refs_tok = [[t] for t in targets_tok]
+
+    return compute_bleu(refs_tok, translations_tok, **kwargs)[0]
