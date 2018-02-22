@@ -75,6 +75,11 @@ class UMTBatcher(object):
             src_noised = seq_noise_many(src)
             trg_noised = seq_noise_many(trg)
 
+            src = [[constants.BOS] + seq + [constants.EOS] for seq in src]
+            trg = [[constants.BOS] + seq + [constants.EOS] for seq in trg]
+            src_noised = [[constants.BOS] + seq + [constants.EOS] for seq in src_noised]
+            trg_noised = [[constants.BOS] + seq + [constants.EOS] for seq in trg_noised]
+
             # This is the main data for DAE
             src_noised = pad_to_longest(src_noised)
             trg_noised = pad_to_longest(trg_noised)
