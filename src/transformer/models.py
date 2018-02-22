@@ -207,7 +207,7 @@ class Transformer(nn.Module):
         n_remaining_sents = batch_size
 
         #- Decode
-        for i in tqdm(range(max_len)):
+        for i in range(max_len):
             len_dec_seq = i + 1
 
             # -- Preparing decoded data seq -- #
@@ -298,7 +298,8 @@ class Transformer(nn.Module):
 
         for i in range(batch_size):
             beams[i].sort_scores()
-            translation = beams[i].get_hypothesis(0) # Best hypothesis lies at index 0
+            _, idx = beams[i].get_the_best_score_and_idx()
+            translation = beams[i].get_hypothesis(idx)
             translations.append(translation)
 
         return translations

@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import torch
 from torch.autograd import Variable
 from tqdm import tqdm
@@ -9,8 +11,8 @@ import pandas as pd
 use_cuda = torch.cuda.is_available()
 
 LOSSES_TITLES = {
-    'ae_loss_src': '[src] lang AE loss',
-    'ae_loss_trg': '[trg] lang AE loss',
+    'dae_loss_src': '[src] lang AE loss',
+    'dae_loss_trg': '[trg] lang AE loss',
     'loss_bt_src': '[src] lang back-translation loss',
     'loss_bt_trg': '[trg] lang back-translation loss',
     'discr_loss_src': '[src] lang discriminator loss',
@@ -20,23 +22,36 @@ LOSSES_TITLES = {
 }
 
 
-class UMTTrainer:
-    def __init__(translator, discriminator,
-        translator_optimizer, dicsrriminator_optimizer, config):
+class Trainer:
+    def __init__(self, translator, discriminator, translator_optimizer, discriminator_optimizer,
+                reconstruct_src_criterion, reconstruct_trg_criterion, adv_criterion, config):
 
-        self.translator = translator
+        self.transformer = translator
         self.discriminator = discriminator
-        self.translator = translator_optimizer
-        self.discriminator = discriminator_optimizer
+        self.transformer_optimizer = translator_optimizer
+        self.discriminator_optimizer = discriminator_optimizer
+        self.reconstruct_src_criterion = reconstruct_src_criterion
+        self.reconstruct_trg_criterion = reconstruct_trg_criterion
+        self.adv_criterion = adv_criterion
+
+        if use_cuda:
+            self.transformer.cuda()
+            self.discriminator.cuda()
+            self.transformer.cuda()
+            self.discriminator.cuda()
+            self.reconstruct_src_criterion.cuda()
+            self.reconstruct_trg_criterion.cuda()
+            self.adv_criterion.cuda()
 
         self.num_iters_done = 0
         self.num_epochs_done = 0
         self.max_num_epochs = config.get('max_num_epochs', 100)
         self.start_bt_from_epoch = config.get('start_bt_from_epoch', 1)
+        self.max_seq_len = config.get('max_seq_len', 50)
 
         self.losses = {
-            'ae_loss_src': [],
-            'ae_loss_trg': [],
+            'dae_loss_src': [],
+            'dae_loss_trg': [],
             'loss_bt_src': [],
             'loss_bt_trg': [],
             'discr_loss_src': [],
@@ -45,22 +60,28 @@ class UMTTrainer:
             'gen_loss_trg': []
         }
 
-    def run_training(training_data, visualize_losses=False):
+        # Val losses have the same structure, so let's just clone them
+        self.val_losses = deepcopy(self.losses)
+        self.val_iters = deepcopy(self.losses)
+
+    def run_training(self, training_data, val_data, plot_every=None):
         should_continue = True
 
         while self.num_epochs_done < self.max_num_epochs and should_continue:
+            self.validate(val_data)
+
             for batch in tqdm(training_data, leave=False):
                 try:
                     self.train_on_batch(batch)
+                    if plot_every and self.num_iters_done % plot_every == 0: self.plot_losses()
                     self.num_iters_done += 1
-                    if visualize_losses: self.visualize_losses()
                 except KeyboardInterrupt:
                     should_continue = False
                     break
 
-        self.num_epochs_done += 1
+            self.num_epochs_done += 1
 
-    def train_on_batch(batch):
+    def train_on_batch(self, batch):
         src_noised, trg_noised, src, trg = batch
 
         # Resetting gradients
@@ -69,79 +90,127 @@ class UMTTrainer:
 
         should_backtranslate = self.num_epochs_done >= self.start_bt_from_epoch
 
-        encodings = self._train_ae(src_noised, trg_noised, src, trg)
-        if should_backtranslate: self._train_bt(src, trg)
-        domains_predictions = self._train_discriminator(*encodings)
-        self._train_generator(*domains_predictions)
+        # DAE step
+        self.transformer.train()
+        losses, encodings = self._run_dae(src_noised, trg_noised, src, trg)
+        dae_loss_src, dae_loss_trg = losses
+        dae_loss_src.backward(retain_graph=True)
+        dae_loss_trg.backward(retain_graph=True)
+        if not should_backtranslate: self.transformer_optimizer.step()
+        self.losses['dae_loss_src'].append(dae_loss_src.data[0])
+        self.losses['dae_loss_trg'].append(dae_loss_trg.data[0])
 
-    def _train_ae(src_noised, trg_noised, src, trg):
-        ### Training autoencoder ###
-        self.translator.train()
+        # (Back) translation step
+        if should_backtranslate:
+            self.transformer.eval()
+            loss_bt_src, loss_bt_trg = self._run_bt(src, trg)
+            loss_bt_src.backward(retain_graph=True)
+            loss_bt_trg.backward(retain_graph=True)
+            self.transformer_optimizer.step()
+            self.losses['loss_bt_src'].append(loss_bt_src.data[0])
+            self.losses['loss_bt_trg'].append(loss_bt_trg.data[0])
+
+        # Discriminator step
+        self.transformer_optimizer.zero_grad()
+        losses, domains_predictions = self._run_discriminator(*encodings)
+        discr_loss_src, discr_loss_trg = losses
+        discr_loss_src.backward(retain_graph=True)
+        discr_loss_trg.backward(retain_graph=True)
+        self.discriminator_optimizer.step()
+        self.losses['discr_loss_src'].append(discr_loss_src.data[0])
+        self.losses['discr_loss_trg'].append(discr_loss_trg.data[0])
+
+        # Generator step
+        self.transformer_optimizer.zero_grad()
+        self.discriminator_optimizer.zero_grad()
+        gen_loss_src, gen_loss_trg = self._run_generator(*domains_predictions)
+        gen_loss_src.backward(retain_graph=True)
+        gen_loss_trg.backward(retain_graph=True)
+        self.transformer_optimizer.step()
+        self.losses['gen_loss_src'].append(gen_loss_src.data[0])
+        self.losses['gen_loss_trg'].append(gen_loss_trg.data[0])
+
+    def eval_on_batch(self, batch):
+        src_noised, trg_noised, src, trg = batch
+        should_backtranslate = self.num_epochs_done >= self.start_bt_from_epoch
+
+        self.transformer.eval()
+        self.discriminator.eval()
+
+        # DAE step
+        losses, encodings = self._run_dae(src_noised, trg_noised, src, trg)
+        dae_loss_src, dae_loss_trg = losses
+        self.val_losses['dae_loss_src'].append(dae_loss_src.data[0])
+        self.val_losses['dae_loss_trg'].append(dae_loss_trg.data[0])
+        self.val_iters['dae_loss_src'].append(self.num_iters_done)
+        self.val_iters['dae_loss_trg'].append(self.num_iters_done)
+
+        # (Back) translation step
+        if should_backtranslate:
+            loss_bt_src, loss_bt_trg = self._run_bt(src, trg)
+            self.val_losses['loss_bt_src'].append(loss_bt_src.data[0])
+            self.val_losses['loss_bt_trg'].append(loss_bt_trg.data[0])
+            self.val_iters['loss_bt_src'].append(self.num_iters_done)
+            self.val_iters['loss_bt_trg'].append(self.num_iters_done)
+
+        # Discriminator step
+        losses, domains_predictions = self._run_discriminator(*encodings)
+        discr_loss_src, discr_loss_trg = losses
+        self.val_losses['discr_loss_src'].append(discr_loss_src.data[0])
+        self.val_losses['discr_loss_trg'].append(discr_loss_trg.data[0])
+        self.val_iters['discr_loss_src'].append(self.num_iters_done)
+        self.val_iters['discr_loss_trg'].append(self.num_iters_done)
+
+        # Generator step
+        gen_loss_src, gen_loss_trg = self._run_generator(*domains_predictions)
+        self.val_losses['gen_loss_src'].append(gen_loss_src.data[0])
+        self.val_losses['gen_loss_trg'].append(gen_loss_trg.data[0])
+        self.val_iters['gen_loss_src'].append(self.num_iters_done)
+        self.val_iters['gen_loss_trg'].append(self.num_iters_done)
+
+    def validate(self, val_data):
+        for val_batch in val_data:
+            self.eval_on_batch(val_batch)
+
+    def _run_dae(self, src_noised, trg_noised, src, trg):
         # Computing translation for ~src->src and ~trg->trg autoencoding tasks
-        print('Training discriminator')
-        print('Computing predictions')
-        preds_src, encodings_src = self.translator(src_noised, src, return_encodings=True, use_src_embs_in_decoder=True)
-        preds_trg, encodings_trg = self.translator(trg_noised, trg, return_encodings=True, use_trg_embs_in_encoder=True)
+        preds_src, encodings_src = self.transformer(src_noised, src, return_encodings=True, use_src_embs_in_decoder=True)
+        preds_trg, encodings_trg = self.transformer(trg_noised, trg, return_encodings=True, use_trg_embs_in_encoder=True)
 
-        print('Computing losses')
-        ae_loss_src = ae_criterion_src(preds_src, src[:, 1:].contiguous().view(-1))
-        ae_loss_trg = ae_criterion_trg(preds_trg, trg[:, 1:].contiguous().view(-1))
+        # Computing losses
+        dae_loss_src = self.reconstruct_src_criterion(preds_src, src[:, 1:].contiguous().view(-1))
+        dae_loss_trg = self.reconstruct_trg_criterion(preds_trg, trg[:, 1:].contiguous().view(-1))
 
-        print('Computing gradients')
-        ae_loss_src.backward(retain_graph=True)
-        ae_loss_trg.backward(retain_graph=True)
+        return (dae_loss_src, dae_loss_trg), (encodings_src, encodings_trg)
 
-        self.losses['ae_loss_src'].append(ae_loss_src.data[0])
-        self.losses['ae_loss_trg'].append(ae_loss_trg.data[0])
-
-    def _train_bt(src, trg):
-        ### Training translator ###
-        print('Training translator')
-        self.translator.eval()
+    def _run_bt(self, src, trg):
+        self.transformer.eval()
         # Get translations for backtranslation
-        print('Computing back-translations')
-        bt_trg, *_ = self.translator.translate_batch(src, beam_size=2, max_len=10)
-        bt_src, *_ = self.translator.translate_batch(trg, use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True, beam_size=2, max_len=10)
+        bt_trg = self.transformer.translate_batch(src, beam_size=2, max_len=self.max_seq_len)
+        bt_src = self.transformer.translate_batch(trg, beam_size=2, max_len=self.max_seq_len,
+                                                 use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
 
         bt_trg = Variable(torch.LongTensor(bt_trg))
         bt_src = Variable(torch.LongTensor(bt_src))
-
-        # We are given n-best translations. Let's pick the best one
-        bt_trg = bt_trg[:,0,:]
-        bt_src = bt_src[:,0,:]
 
         if use_cuda:
             bt_trg = bt_trg.cuda()
             bt_src = bt_src.cuda()
 
         # Computing predictions for back-translated sentences
-        self.translator.train()
-        print('Computing predictions (translations of back-translations)')
-        bt_src_preds = self.translator(bt_trg, src, use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
-        bt_trg_preds = self.translator(bt_src, trg)
+        self.transformer.train()
+        bt_src_preds = self.transformer(bt_trg, src, use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
+        bt_trg_preds = self.transformer(bt_src, trg)
 
-        print('Computing losses')
-        loss_bt_src = translation_criterion_trg_to_src(bt_src_preds, src[:, 1:].contiguous().view(-1))
-        loss_bt_trg = translation_criterion_src_to_trg(bt_trg_preds, trg[:, 1:].contiguous().view(-1))
+        # Computing losses
+        loss_bt_src = self.reconstruct_src_criterion(bt_src_preds, src[:, 1:].contiguous().view(-1))
+        loss_bt_trg = self.reconstruct_trg_criterion(bt_trg_preds, trg[:, 1:].contiguous().view(-1))
 
-        print('Computing gradients')
-        loss_bt_src.backward(retain_graph=True)
-        loss_bt_trg.backward(retain_graph=True)
+        return loss_bt_src, loss_bt_trg
 
-        print('Updating weights')
-        self.transformer_optimizer.step()
-
-        self.transformer_optimizer.zero_grad()
-
-        self.losses['loss_bt_src'].append(loss_bt_src.data[0])
-        self.losses['loss_bt_trg'].append(gen_loss_trg.data[0])
-
-    def _train_discriminator(encodings_src, encodings_trg):
-        ### Training discriminator ###
-        print('Training discriminator')
-        print('Computing predictions')
-        domains_preds_src = discriminator(encodings_src.view(-1, 512))
-        domains_preds_trg = discriminator(encodings_trg.view(-1, 512))
+    def _run_discriminator(self, encodings_src, encodings_trg):
+        domains_preds_src = self.discriminator(encodings_src.view(-1, 512)).view(-1)
+        domains_preds_trg = self.discriminator(encodings_trg.view(-1, 512)).view(-1)
 
         # Generating targets for discriminator
         true_domains_src = Variable(torch.Tensor([0] * len(domains_preds_src)))
@@ -152,29 +221,12 @@ class UMTTrainer:
             true_domains_trg = true_domains_trg.cuda()
 
         # True domains for discriminator loss
-        print('Computing losses')
-        discr_loss_src = adv_criterion(domains_preds_src, true_domains_src)
-        discr_loss_trg = adv_criterion(domains_preds_trg, true_domains_trg)
+        discr_loss_src = self.adv_criterion(domains_preds_src, true_domains_src)
+        discr_loss_trg = self.adv_criterion(domains_preds_trg, true_domains_trg)
 
-        print('Computing gradients')
-        discr_loss_src.backward(retain_graph=True)
-        discr_loss_trg.backward(retain_graph=True)
+        return (discr_loss_src, discr_loss_trg), (domains_preds_src, domains_preds_trg)
 
-        print('Updating parameters')
-        self.discriminator_optimizer.step()
-
-        # Cleaning up gradients
-        self.transformer_optimizer.zero_grad()
-        self.discriminator_optimizer.zero_grad()
-
-        self.losses['discr_loss_src'].append(discr_loss_src.data[0])
-        self.losses['discr_loss_trg'].append(discr_loss_trg.data[0])
-
-        return domains_preds_src, domains_preds_trg
-
-    def _train_generator(domains_preds_src, domains_preds_trg):
-        src_noised, trg_noised, src, trg = batch
-
+    def _run_generator(self, domains_preds_src, domains_preds_trg):
         fake_domains_src = Variable(torch.Tensor([1] * len(domains_preds_src)))
         fake_domains_trg = Variable(torch.Tensor([0] * len(domains_preds_trg)))
 
@@ -182,51 +234,40 @@ class UMTTrainer:
             fake_domains_src = fake_domains_src.cuda()
             fake_domains_trg = fake_domains_trg.cuda()
 
-        ### Training generator ###
-        print('Training generator')
-        print('Computing losses')
         # Faking domains for generator loss
-        gen_loss_src = adv_criterion(domains_preds_src, fake_domains_src)
-        gen_loss_trg = adv_criterion(domains_preds_trg, fake_domains_trg)
+        gen_loss_src = self.adv_criterion(domains_preds_src, fake_domains_src)
+        gen_loss_trg = self.adv_criterion(domains_preds_trg, fake_domains_trg)
 
-        print('Computing gradients')
-        gen_loss_src.backward(retain_graph=True)
-        gen_loss_trg.backward(retain_graph=True)
+        return gen_loss_src, gen_loss_trg
 
-        print('Updating parameters')
-        self.transformer_optimizer.step()
-
-        self.losses['gen_loss_src'].append(gen_loss_src.data[0])
-        self.losses['gen_loss_trg'].append(gen_loss_trg.data[0])
-
-    def visualize_losses():
+    def plot_losses(self):
         clear_output(True)
 
         losses_pairs = [
-            ('ae_loss_src', 'ae_loss_trg'),
+            ('dae_loss_src', 'dae_loss_trg'),
             ('loss_bt_src', 'loss_bt_trg'),
             ('discr_loss_src', 'discr_loss_trg'),
             ('gen_loss_src', 'gen_loss_trg')
         ]
 
-        for src, trg in losses_pair:
+        for src, trg in losses_pairs:
             if len(self.losses[src]) == 0 or len(self.losses[trg]) == 0:
                 continue
 
-            figure, axes = plt.subplots(2, sharey=True)
-            figure.set_figwidth(16)
-            figure.set_figheight(6)
+            plt.figure(figsize=[16,4])
 
             plt.subplot(121)
             plt.title(LOSSES_TITLES[src])
             plt.plot(self.losses[src])
-            plt.plot(pd.DataFrame(self.losses[src]).ewm(span=50))
+            plt.plot(pd.DataFrame(self.losses[src]).ewm(span=50).mean())
+            plt.plot(self.val_iters[src], self.val_losses[src])
             plt.grid()
 
             plt.subplot(122)
             plt.title(LOSSES_TITLES[trg])
             plt.plot(self.losses[trg])
-            plt.plot(pd.DataFrame(self.losses[trg]).ewm(span=50))
+            plt.plot(pd.DataFrame(self.losses[trg]).ewm(span=50).mean())
+            plt.plot(self.val_iters[trg], self.val_losses[trg])
             plt.grid()
 
         plt.show()
