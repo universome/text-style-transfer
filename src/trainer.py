@@ -31,15 +31,15 @@ SCORES_TITLES = {
 
 
 class Trainer:
-    def __init__(self, translator, discriminator, vocab_src, vocab_trg,
-                 translator_optimizer, discriminator_optimizer, transformer_bt_optimizer,
+    def __init__(self, transformer, discriminator, vocab_src, vocab_trg,
+                 transformer_optimizer, discriminator_optimizer, transformer_bt_optimizer,
                  reconstruct_src_criterion, reconstruct_trg_criterion, adv_criterion, config):
 
-        self.transformer = translator
+        self.transformer = transformer
         self.discriminator = discriminator
         self.vocab_src = vocab_src
         self.vocab_trg = vocab_trg
-        self.transformer_optimizer = translator_optimizer
+        self.transformer_optimizer = transformer_optimizer
         self.transformer_bt_optimizer = transformer_bt_optimizer
         self.discriminator_optimizer = discriminator_optimizer
         self.reconstruct_src_criterion = reconstruct_src_criterion
@@ -235,19 +235,15 @@ class Trainer:
         bt_src = self.transformer.translate_batch(trg, beam_size=2, max_len=self.max_seq_len-2,
                                                   use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
 
+        # We should prepend our sentences with BOS symbol
+        bt_trg = [[constants.BOS] + s for s in bt_trg]
+        bt_src = [[constants.BOS] + s for s in bt_src]
+
         # It's a good opportunity for us to measure BLEU score
         bt_trg_sents = token_ids_to_sents(bt_trg, self.vocab_trg)
         bt_src_sents = token_ids_to_sents(bt_src, self.vocab_src)
         src_sents = token_ids_to_sents(src, self.vocab_src)
         trg_sents = token_ids_to_sents(trg, self.vocab_trg)
-
-        # print('Produced sentences:')
-        # for i in range(5):
-        #     print('TRG produced', bt_trg_sents[i])
-        #     print('TRG desired', trg_sents[i])
-        #     print('SRC produced', bt_src_sents[i])
-        #     print('SRC desired', src_sents[i])
-        #     print()
 
         self.train_scores['src_to_trg_bleu'].append(compute_bleu_for_sents(bt_trg_sents, trg_sents))
         self.train_scores['trg_to_src_bleu'].append(compute_bleu_for_sents(bt_src_sents, src_sents))
@@ -346,9 +342,10 @@ class Trainer:
             iters = np.arange(self.start_bt_from_iter, self.start_bt_from_iter + len(self.train_scores[src]))
             plt.subplot(121)
             plt.title('Train BLEU score')
-            plt.plot(iters, self.train_scores[src], label=SCORES_TITLES[src])
-            plt.plot(iters, self.train_scores[trg], label=SCORES_TITLES[trg])
+            plt.plot(iters, pd.DataFrame(self.train_scores[src]).ewm(span=100).mean(), label=SCORES_TITLES[src])
+            plt.plot(iters, pd.DataFrame(self.train_scores[trg]).ewm(span=100).mean(), label=SCORES_TITLES[trg])
             plt.grid()
+            plt.legend()
 
         if self.val_scores['src_to_trg_translation']:
             src, trg = 'src_to_trg_translation', 'trg_to_src_translation'
@@ -357,3 +354,4 @@ class Trainer:
             plt.plot(self.val_iters[src], self.val_scores[src], label=SCORES_TITLES[src])
             plt.plot(self.val_iters[trg], self.val_scores[trg], label=SCORES_TITLES[trg])
             plt.grid()
+            plt.legend()

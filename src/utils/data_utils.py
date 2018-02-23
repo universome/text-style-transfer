@@ -35,20 +35,16 @@ def init_emb_matrix(emb_matrix, emb_dict, token2id):
         
 def token_ids_to_sents(token_ids, vocab):
     if type(token_ids) == Variable: token_ids = token_ids.data.cpu()
-    sents = remove_pads(token_ids)
-
-    for s in sents:
-        if s[0] != constants.BOS: s.insert(0, constants.BOS)
-        if s[-1] != constants.EOS: s.append(constants.EOS)
-            
+    sents = remove_spec_symbols(token_ids)
     sents = [vocab.remove_bpe(vocab.detokenize(s)) for s in sents]
     sents = [' '.join(s.split()) for s in sents]
 
     return sents
 
 
-def remove_pads(ids_seqs):
-    return [[t for t in s if t != constants.PAD] for s in ids_seqs]
+def remove_spec_symbols(ids_seqs):
+    spec_symbols = set([constants.PAD, constants.BOS, constants.EOS])
+    return [[t for t in s if not t in spec_symbols] for s in ids_seqs]
     
 
 class Batcher(object):
