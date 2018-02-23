@@ -69,7 +69,9 @@ class Trainer:
             'discr_loss_src': [],
             'discr_loss_trg': [],
             'gen_loss_src': [],
-            'gen_loss_trg': []
+            'gen_loss_trg': [],
+            'src_to_trg_bleu': [],
+            'trg_to_src_bleu': []
         }
 
         # Val losses have the same structure, so let's just clone them
@@ -81,10 +83,6 @@ class Trainer:
         self.val_scores['trg_to_src_translation'] = []
         self.val_iters['src_to_trg_translation'] = []
         self.val_iters['trg_to_src_translation'] = []
-
-        # And we also have train BLEU scores
-        self.train_scores['src_to_trg_bleu'] = []
-        self.train_scores['trg_to_src_bleu'] = []
 
     def run_training(self, training_data, val_data, translation_val_data,
                      plot_every=50, val_translate_every=100):
@@ -107,52 +105,47 @@ class Trainer:
 
     def train_on_batch(self, batch):
         src_noised, trg_noised, src, trg = batch
-
-        # Resetting gradients
-        self.transformer_optimizer.zero_grad()
-        self.transformer_bt_optimizer.zero_grad()
-        self.discriminator_optimizer.zero_grad()
-
         should_backtranslate = self.num_iters_done >= self.start_bt_from_iter
+        total_transformer_loss = 0
+        total_discriminator_loss = 0
 
         # DAE step
         self.transformer.train()
         losses, encodings = self._run_dae(src_noised, trg_noised, src, trg)
         dae_loss_src, dae_loss_trg = losses
-        dae_loss_src.backward(retain_graph=True)
-        dae_loss_trg.backward(retain_graph=True)
-        self.transformer_optimizer.step()
+        total_transformer_loss += (dae_loss_src + dae_loss_trg)
         self.train_scores['dae_loss_src'].append(dae_loss_src.data[0])
         self.train_scores['dae_loss_trg'].append(dae_loss_trg.data[0])
 
         # (Back) translation step
         if should_backtranslate:
             loss_bt_src, loss_bt_trg = self._run_bt(src, trg)
-            loss_bt_src.backward(retain_graph=True)
-            loss_bt_trg.backward(retain_graph=True)
-            self.transformer_bt_optimizer.step()
+            total_transformer_loss += (loss_bt_src + loss_bt_trg)
             self.train_scores['loss_bt_src'].append(loss_bt_src.data[0])
             self.train_scores['loss_bt_trg'].append(loss_bt_trg.data[0])
 
         # Discriminator step
-        self.transformer_optimizer.zero_grad()
         losses, domains_predictions = self._run_discriminator(*encodings)
         discr_loss_src, discr_loss_trg = losses
-        discr_loss_src.backward(retain_graph=True)
-        discr_loss_trg.backward(retain_graph=True)
-        self.discriminator_optimizer.step()
+        total_discriminator_loss += (discr_loss_src + discr_loss_trg)
         self.train_scores['discr_loss_src'].append(discr_loss_src.data[0])
         self.train_scores['discr_loss_trg'].append(discr_loss_trg.data[0])
 
         # Generator step
-        self.transformer_optimizer.zero_grad()
-        self.discriminator_optimizer.zero_grad()
         gen_loss_src, gen_loss_trg = self._run_generator(*domains_predictions)
-        gen_loss_src.backward(retain_graph=True)
-        gen_loss_trg.backward(retain_graph=True)
+        total_transformer_loss += (gen_loss_src + gen_loss_trg)
         self.transformer_optimizer.step()
         self.train_scores['gen_loss_src'].append(gen_loss_src.data[0])
         self.train_scores['gen_loss_trg'].append(gen_loss_trg.data[0])
+        
+        # Backward passes
+        self.transformer_optimizer.zero_grad()
+        total_transformer_loss.backward(retain_graph=True)
+        self.transformer_optimizer.step()
+        
+        self.discriminator_optimizer.zero_grad()
+        total_discriminator_loss.backward()
+        self.discriminator_optimizer.step()
 
     def eval_on_batch(self, batch):
         src_noised, trg_noised, src, trg = batch
@@ -337,6 +330,7 @@ class Trainer:
 
         plt.figure(figsize=[16,4])
 
+        # TODO: show it for validation too!
         if self.train_scores['src_to_trg_bleu']:
             src, trg = 'src_to_trg_bleu', 'trg_to_src_bleu'
             iters = np.arange(self.start_bt_from_iter, self.start_bt_from_iter + len(self.train_scores[src]))
