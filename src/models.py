@@ -9,6 +9,7 @@ class FFN(nn.Module):
         self.input_size = input_size
 
         self.nn = nn.Sequential(
+            nn.Dropout(0.2),
             nn.Linear(self.input_size, self.hid_size),
             nn.ReLU(),
             self._init_hidden(),
@@ -20,7 +21,11 @@ class FFN(nn.Module):
         layers = []
 
         for _ in range(self.n_hid_layers):
-            layers += [nn.Linear(self.hid_size, self.hid_size), nn.ReLU()]
+            layers += [
+                nn.Dropout(0.3),
+                nn.Linear(self.hid_size, self.hid_size),
+                nn.ReLU()
+            ]
 
         return nn.Sequential(*layers)
 
