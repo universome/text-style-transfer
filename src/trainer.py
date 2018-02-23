@@ -8,6 +8,9 @@ from IPython.display import clear_output
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from src.utils.data_utils import pad_to_longest
+import src.transformer.constants as constants
+
 use_cuda = torch.cuda.is_available()
 
 LOSSES_TITLES = {
@@ -18,17 +21,20 @@ LOSSES_TITLES = {
     'discr_loss_src': '[src] lang discriminator loss',
     'discr_loss_trg': '[trg] lang discriminator loss',
     'gen_loss_src': '[src] lang generator loss',
-    'gen_loss_trg': '[trg] lang generator loss'
+    'gen_loss_trg': '[trg] lang generator loss',
+    'src_to_trg_translation': '[src->trg] translation loss',
+    'trg_to_src_translation': '[trg->src] translation loss'
 }
 
 
 class Trainer:
-    def __init__(self, translator, discriminator, translator_optimizer, discriminator_optimizer,
+    def __init__(self, translator, discriminator, translator_optimizer, discriminator_optimizer, transformer_bt_optimizer,
                 reconstruct_src_criterion, reconstruct_trg_criterion, adv_criterion, config):
 
         self.transformer = translator
         self.discriminator = discriminator
         self.transformer_optimizer = translator_optimizer
+        self.transformer_bt_optimizer = transformer_bt_optimizer
         self.discriminator_optimizer = discriminator_optimizer
         self.reconstruct_src_criterion = reconstruct_src_criterion
         self.reconstruct_trg_criterion = reconstruct_trg_criterion
@@ -46,7 +52,7 @@ class Trainer:
         self.num_iters_done = 0
         self.num_epochs_done = 0
         self.max_num_epochs = config.get('max_num_epochs', 100)
-        self.start_bt_from_epoch = config.get('start_bt_from_epoch', 1)
+        self.start_bt_from_iter = config.get('start_bt_from_iter', 500)
         self.max_seq_len = config.get('max_seq_len', 50)
 
         self.losses = {
@@ -57,14 +63,17 @@ class Trainer:
             'discr_loss_src': [],
             'discr_loss_trg': [],
             'gen_loss_src': [],
-            'gen_loss_trg': []
+            'gen_loss_trg': [],
+            'src_to_trg_translation': [],
+            'trg_to_src_translation': []
         }
 
         # Val losses have the same structure, so let's just clone them
         self.val_losses = deepcopy(self.losses)
         self.val_iters = deepcopy(self.losses)
 
-    def run_training(self, training_data, val_data, plot_every=None):
+    def run_training(self, training_data, val_data, translation_val_data,
+                     plot_every=50, val_translate_every=100):
         should_continue = True
 
         while self.num_epochs_done < self.max_num_epochs and should_continue:
@@ -73,7 +82,8 @@ class Trainer:
             for batch in tqdm(training_data, leave=False):
                 try:
                     self.train_on_batch(batch)
-                    if plot_every and self.num_iters_done % plot_every == 0: self.plot_losses()
+                    if self.num_iters_done % val_translate_every == 0: self.validate_translation(translation_val_data)
+                    if self.num_iters_done % plot_every == 0: self.plot_losses()
                     self.num_iters_done += 1
                 except KeyboardInterrupt:
                     should_continue = False
@@ -86,9 +96,10 @@ class Trainer:
 
         # Resetting gradients
         self.transformer_optimizer.zero_grad()
+        self.transformer_bt_optimizer.zero_grad()
         self.discriminator_optimizer.zero_grad()
 
-        should_backtranslate = self.num_epochs_done >= self.start_bt_from_epoch
+        should_backtranslate = self.num_iters_done >= self.start_bt_from_iter
 
         # DAE step
         self.transformer.train()
@@ -96,17 +107,16 @@ class Trainer:
         dae_loss_src, dae_loss_trg = losses
         dae_loss_src.backward(retain_graph=True)
         dae_loss_trg.backward(retain_graph=True)
-        if not should_backtranslate: self.transformer_optimizer.step()
+        self.transformer_optimizer.step()
         self.losses['dae_loss_src'].append(dae_loss_src.data[0])
         self.losses['dae_loss_trg'].append(dae_loss_trg.data[0])
 
         # (Back) translation step
         if should_backtranslate:
-            self.transformer.eval()
             loss_bt_src, loss_bt_trg = self._run_bt(src, trg)
             loss_bt_src.backward(retain_graph=True)
             loss_bt_trg.backward(retain_graph=True)
-            self.transformer_optimizer.step()
+            self.transformer_bt_optimizer.step()
             self.losses['loss_bt_src'].append(loss_bt_src.data[0])
             self.losses['loss_bt_trg'].append(loss_bt_trg.data[0])
 
@@ -132,7 +142,7 @@ class Trainer:
 
     def eval_on_batch(self, batch):
         src_noised, trg_noised, src, trg = batch
-        should_backtranslate = self.num_epochs_done >= self.start_bt_from_epoch
+        should_backtranslate = self.num_iters_done >= self.start_bt_from_iter
 
         self.transformer.eval()
         self.discriminator.eval()
@@ -171,6 +181,32 @@ class Trainer:
     def validate(self, val_data):
         for val_batch in val_data:
             self.eval_on_batch(val_batch)
+            
+    def validate_translation(self, val_data):
+        val_losses_src_to_trg = []
+        val_losses_trg_to_src = []
+
+        for val_batch in val_data:
+            val_src, val_trg = val_batch
+
+            val_pred_trg = self.transformer(val_src, val_trg)
+            val_pred_src = self.transformer(val_trg, val_src, use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
+
+            val_loss_src_to_trg = self.reconstruct_trg_criterion(val_pred_trg, val_trg[:, 1:].contiguous().view(-1))
+            val_loss_trg_to_src = self.reconstruct_src_criterion(val_pred_src, val_src[:, 1:].contiguous().view(-1))
+
+            val_losses_src_to_trg.append(val_loss_src_to_trg.data[0])
+            val_losses_trg_to_src.append(val_loss_trg_to_src.data[0])
+
+        self.val_losses['src_to_trg_translation'].append(np.mean(val_losses_src_to_trg))
+        self.val_losses['trg_to_src_translation'].append(np.mean(val_losses_trg_to_src))
+        self.val_iters['src_to_trg_translation'].append(self.num_iters_done)
+        self.val_iters['trg_to_src_translation'].append(self.num_iters_done)
+        
+        # TODO(universome): we have to add dummy values so plot is displayed
+        self.losses['src_to_trg_translation'].append(0)
+        self.losses['trg_to_src_translation'].append(0)
+            
 
     def _run_dae(self, src_noised, trg_noised, src, trg):
         # Computing translation for ~src->src and ~trg->trg autoencoding tasks
@@ -186,16 +222,14 @@ class Trainer:
     def _run_bt(self, src, trg):
         self.transformer.eval()
         # Get translations for backtranslation
-        bt_trg = self.transformer.translate_batch(src, beam_size=2, max_len=self.max_seq_len)
-        bt_src = self.transformer.translate_batch(trg, beam_size=2, max_len=self.max_seq_len,
-                                                 use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
+        bt_trg = self.transformer.translate_batch(src, beam_size=2, max_len=self.max_seq_len-2)
+        bt_src = self.transformer.translate_batch(trg, beam_size=2, max_len=self.max_seq_len-2,
+                                                  use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
 
-        bt_trg = Variable(torch.LongTensor(bt_trg))
-        bt_src = Variable(torch.LongTensor(bt_src))
-
-        if use_cuda:
-            bt_trg = bt_trg.cuda()
-            bt_src = bt_src.cuda()
+        bt_trg = [[constants.BOS] + seq for seq in bt_trg]
+        bt_src = [[constants.BOS] + seq for seq in bt_src]
+        bt_trg = pad_to_longest(bt_trg)
+        bt_src = pad_to_longest(bt_src)
 
         # Computing predictions for back-translated sentences
         self.transformer.train()
@@ -247,7 +281,8 @@ class Trainer:
             ('dae_loss_src', 'dae_loss_trg'),
             ('loss_bt_src', 'loss_bt_trg'),
             ('discr_loss_src', 'discr_loss_trg'),
-            ('gen_loss_src', 'gen_loss_trg')
+            ('gen_loss_src', 'gen_loss_trg'),
+            ('src_to_trg_translation', 'trg_to_src_translation')
         ]
 
         for src, trg in losses_pairs:
@@ -259,14 +294,14 @@ class Trainer:
             plt.subplot(121)
             plt.title(LOSSES_TITLES[src])
             plt.plot(self.losses[src])
-            plt.plot(pd.DataFrame(self.losses[src]).ewm(span=50).mean())
+            plt.plot(pd.DataFrame(self.losses[src]).ewm(span=100).mean())
             plt.plot(self.val_iters[src], self.val_losses[src])
             plt.grid()
 
             plt.subplot(122)
             plt.title(LOSSES_TITLES[trg])
             plt.plot(self.losses[trg])
-            plt.plot(pd.DataFrame(self.losses[trg]).ewm(span=50).mean())
+            plt.plot(pd.DataFrame(self.losses[trg]).ewm(span=100).mean())
             plt.plot(self.val_iters[trg], self.val_losses[trg])
             plt.grid()
 
