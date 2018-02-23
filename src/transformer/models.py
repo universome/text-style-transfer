@@ -133,6 +133,7 @@ class Transformer(nn.Module):
         self.tgt_word_proj = Linear(d_model, n_tgt_vocab, bias=False)
         self.dropout = nn.Dropout(dropout)
         self.d_model = d_model
+        self.proj_share_weight = proj_share_weight
         self.prob_projection = nn.LogSoftmax(dim=1)
 
         assert d_model == d_word_vec, \
@@ -157,7 +158,24 @@ class Transformer(nn.Module):
         enc_freezed_param_ids = set(map(id, self.encoder.position_enc.parameters()))
         dec_freezed_param_ids = set(map(id, self.decoder.position_enc.parameters()))
         freezed_param_ids = enc_freezed_param_ids | dec_freezed_param_ids
+        
         return (p for p in self.parameters() if id(p) not in freezed_param_ids)
+    
+    def get_embs_parameters(self):
+        enc_embs = set(map(id, self.encoder.src_word_emb.parameters()))
+        dec_embs = set(map(id, self.decoder.tgt_word_emb.parameters()))
+        src_proj_embs = set(map(id, self.src_word_proj.parameters()))
+        trg_proj_embs = set(map(id, self.tgt_word_proj.parameters()))
+        embs_ids = enc_embs | dec_embs | src_proj_embs | trg_proj_embs
+        
+        return (p for p in self.parameters() if id(p) in embs_ids)
+            
+    def get_trainable_params_without_embs(self):
+        trainable = self.get_trainable_parameters()
+        embs_ids = set(map(id, self.get_embs_parameters()))
+        
+        return (p for p in trainable if not id(p) in embs_ids)
+        
 
     def forward(self, src, trg, use_trg_embs_in_encoder=False, use_src_embs_in_decoder=False, return_encodings=False):
         trg = trg[:, :-1]
