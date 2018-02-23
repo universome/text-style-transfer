@@ -8,12 +8,13 @@ from IPython.display import clear_output
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from src.utils.data_utils import pad_to_longest
+from src.utils.data_utils import pad_to_longest, token_ids_to_sents
+from src.utils.bleu import compute_bleu_for_sents
 import src.transformer.constants as constants
 
 use_cuda = torch.cuda.is_available()
 
-LOSSES_TITLES = {
+SCORES_TITLES = {
     'dae_loss_src': '[src] lang AE loss',
     'dae_loss_trg': '[trg] lang AE loss',
     'loss_bt_src': '[src] lang back-translation loss',
@@ -23,16 +24,21 @@ LOSSES_TITLES = {
     'gen_loss_src': '[src] lang generator loss',
     'gen_loss_trg': '[trg] lang generator loss',
     'src_to_trg_translation': '[src->trg] translation loss',
-    'trg_to_src_translation': '[trg->src] translation loss'
+    'trg_to_src_translation': '[trg->src] translation loss',
+    'src_to_trg_bleu': '[src->trg] BLEU score',
+    'trg_to_src_bleu': '[trg->src] BLEU score',
 }
 
 
 class Trainer:
-    def __init__(self, translator, discriminator, translator_optimizer, discriminator_optimizer, transformer_bt_optimizer,
-                reconstruct_src_criterion, reconstruct_trg_criterion, adv_criterion, config):
+    def __init__(self, translator, discriminator, vocab_src, vocab_trg,
+                 translator_optimizer, discriminator_optimizer, transformer_bt_optimizer,
+                 reconstruct_src_criterion, reconstruct_trg_criterion, adv_criterion, config):
 
         self.transformer = translator
         self.discriminator = discriminator
+        self.vocab_src = vocab_src
+        self.vocab_trg = vocab_trg
         self.transformer_optimizer = translator_optimizer
         self.transformer_bt_optimizer = transformer_bt_optimizer
         self.discriminator_optimizer = discriminator_optimizer
@@ -55,7 +61,7 @@ class Trainer:
         self.start_bt_from_iter = config.get('start_bt_from_iter', 500)
         self.max_seq_len = config.get('max_seq_len', 50)
 
-        self.losses = {
+        self.train_scores = {
             'dae_loss_src': [],
             'dae_loss_trg': [],
             'loss_bt_src': [],
@@ -63,14 +69,22 @@ class Trainer:
             'discr_loss_src': [],
             'discr_loss_trg': [],
             'gen_loss_src': [],
-            'gen_loss_trg': [],
-            'src_to_trg_translation': [],
-            'trg_to_src_translation': []
+            'gen_loss_trg': []
         }
 
         # Val losses have the same structure, so let's just clone them
-        self.val_losses = deepcopy(self.losses)
-        self.val_iters = deepcopy(self.losses)
+        self.val_scores = deepcopy(self.train_scores)
+        self.val_iters = deepcopy(self.train_scores)
+
+        # Additionally, we have val scores for translation CE
+        self.val_scores['src_to_trg_translation'] = []
+        self.val_scores['trg_to_src_translation'] = []
+        self.val_iters['src_to_trg_translation'] = []
+        self.val_iters['trg_to_src_translation'] = []
+
+        # And we also have train BLEU scores
+        self.train_scores['src_to_trg_bleu'] = []
+        self.train_scores['trg_to_src_bleu'] = []
 
     def run_training(self, training_data, val_data, translation_val_data,
                      plot_every=50, val_translate_every=100):
@@ -83,7 +97,7 @@ class Trainer:
                 try:
                     self.train_on_batch(batch)
                     if self.num_iters_done % val_translate_every == 0: self.validate_translation(translation_val_data)
-                    if self.num_iters_done % plot_every == 0: self.plot_losses()
+                    if self.num_iters_done % plot_every == 0: self.plot_scores()
                     self.num_iters_done += 1
                 except KeyboardInterrupt:
                     should_continue = False
@@ -108,8 +122,8 @@ class Trainer:
         dae_loss_src.backward(retain_graph=True)
         dae_loss_trg.backward(retain_graph=True)
         self.transformer_optimizer.step()
-        self.losses['dae_loss_src'].append(dae_loss_src.data[0])
-        self.losses['dae_loss_trg'].append(dae_loss_trg.data[0])
+        self.train_scores['dae_loss_src'].append(dae_loss_src.data[0])
+        self.train_scores['dae_loss_trg'].append(dae_loss_trg.data[0])
 
         # (Back) translation step
         if should_backtranslate:
@@ -117,8 +131,8 @@ class Trainer:
             loss_bt_src.backward(retain_graph=True)
             loss_bt_trg.backward(retain_graph=True)
             self.transformer_bt_optimizer.step()
-            self.losses['loss_bt_src'].append(loss_bt_src.data[0])
-            self.losses['loss_bt_trg'].append(loss_bt_trg.data[0])
+            self.train_scores['loss_bt_src'].append(loss_bt_src.data[0])
+            self.train_scores['loss_bt_trg'].append(loss_bt_trg.data[0])
 
         # Discriminator step
         self.transformer_optimizer.zero_grad()
@@ -127,8 +141,8 @@ class Trainer:
         discr_loss_src.backward(retain_graph=True)
         discr_loss_trg.backward(retain_graph=True)
         self.discriminator_optimizer.step()
-        self.losses['discr_loss_src'].append(discr_loss_src.data[0])
-        self.losses['discr_loss_trg'].append(discr_loss_trg.data[0])
+        self.train_scores['discr_loss_src'].append(discr_loss_src.data[0])
+        self.train_scores['discr_loss_trg'].append(discr_loss_trg.data[0])
 
         # Generator step
         self.transformer_optimizer.zero_grad()
@@ -137,8 +151,8 @@ class Trainer:
         gen_loss_src.backward(retain_graph=True)
         gen_loss_trg.backward(retain_graph=True)
         self.transformer_optimizer.step()
-        self.losses['gen_loss_src'].append(gen_loss_src.data[0])
-        self.losses['gen_loss_trg'].append(gen_loss_trg.data[0])
+        self.train_scores['gen_loss_src'].append(gen_loss_src.data[0])
+        self.train_scores['gen_loss_trg'].append(gen_loss_trg.data[0])
 
     def eval_on_batch(self, batch):
         src_noised, trg_noised, src, trg = batch
@@ -150,38 +164,38 @@ class Trainer:
         # DAE step
         losses, encodings = self._run_dae(src_noised, trg_noised, src, trg)
         dae_loss_src, dae_loss_trg = losses
-        self.val_losses['dae_loss_src'].append(dae_loss_src.data[0])
-        self.val_losses['dae_loss_trg'].append(dae_loss_trg.data[0])
+        self.val_scores['dae_loss_src'].append(dae_loss_src.data[0])
+        self.val_scores['dae_loss_trg'].append(dae_loss_trg.data[0])
         self.val_iters['dae_loss_src'].append(self.num_iters_done)
         self.val_iters['dae_loss_trg'].append(self.num_iters_done)
 
         # (Back) translation step
         if should_backtranslate:
             loss_bt_src, loss_bt_trg = self._run_bt(src, trg)
-            self.val_losses['loss_bt_src'].append(loss_bt_src.data[0])
-            self.val_losses['loss_bt_trg'].append(loss_bt_trg.data[0])
+            self.val_scores['loss_bt_src'].append(loss_bt_src.data[0])
+            self.val_scores['loss_bt_trg'].append(loss_bt_trg.data[0])
             self.val_iters['loss_bt_src'].append(self.num_iters_done)
             self.val_iters['loss_bt_trg'].append(self.num_iters_done)
 
         # Discriminator step
         losses, domains_predictions = self._run_discriminator(*encodings)
         discr_loss_src, discr_loss_trg = losses
-        self.val_losses['discr_loss_src'].append(discr_loss_src.data[0])
-        self.val_losses['discr_loss_trg'].append(discr_loss_trg.data[0])
+        self.val_scores['discr_loss_src'].append(discr_loss_src.data[0])
+        self.val_scores['discr_loss_trg'].append(discr_loss_trg.data[0])
         self.val_iters['discr_loss_src'].append(self.num_iters_done)
         self.val_iters['discr_loss_trg'].append(self.num_iters_done)
 
         # Generator step
         gen_loss_src, gen_loss_trg = self._run_generator(*domains_predictions)
-        self.val_losses['gen_loss_src'].append(gen_loss_src.data[0])
-        self.val_losses['gen_loss_trg'].append(gen_loss_trg.data[0])
+        self.val_scores['gen_loss_src'].append(gen_loss_src.data[0])
+        self.val_scores['gen_loss_trg'].append(gen_loss_trg.data[0])
         self.val_iters['gen_loss_src'].append(self.num_iters_done)
         self.val_iters['gen_loss_trg'].append(self.num_iters_done)
 
     def validate(self, val_data):
         for val_batch in val_data:
             self.eval_on_batch(val_batch)
-            
+
     def validate_translation(self, val_data):
         val_losses_src_to_trg = []
         val_losses_trg_to_src = []
@@ -198,15 +212,10 @@ class Trainer:
             val_losses_src_to_trg.append(val_loss_src_to_trg.data[0])
             val_losses_trg_to_src.append(val_loss_trg_to_src.data[0])
 
-        self.val_losses['src_to_trg_translation'].append(np.mean(val_losses_src_to_trg))
-        self.val_losses['trg_to_src_translation'].append(np.mean(val_losses_trg_to_src))
+        self.val_scores['src_to_trg_translation'].append(np.mean(val_losses_src_to_trg))
+        self.val_scores['trg_to_src_translation'].append(np.mean(val_losses_trg_to_src))
         self.val_iters['src_to_trg_translation'].append(self.num_iters_done)
         self.val_iters['trg_to_src_translation'].append(self.num_iters_done)
-        
-        # TODO(universome): we have to add dummy values so plot is displayed
-        self.losses['src_to_trg_translation'].append(0)
-        self.losses['trg_to_src_translation'].append(0)
-            
 
     def _run_dae(self, src_noised, trg_noised, src, trg):
         # Computing translation for ~src->src and ~trg->trg autoencoding tasks
@@ -226,8 +235,23 @@ class Trainer:
         bt_src = self.transformer.translate_batch(trg, beam_size=2, max_len=self.max_seq_len-2,
                                                   use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
 
-        bt_trg = [[constants.BOS] + seq for seq in bt_trg]
-        bt_src = [[constants.BOS] + seq for seq in bt_src]
+        # It's a good opportunity for us to measure BLEU score
+        bt_trg_sents = token_ids_to_sents(bt_trg, self.vocab_trg)
+        bt_src_sents = token_ids_to_sents(bt_src, self.vocab_src)
+        src_sents = token_ids_to_sents(src, self.vocab_src)
+        trg_sents = token_ids_to_sents(trg, self.vocab_trg)
+
+        # print('Produced sentences:')
+        # for i in range(5):
+        #     print('TRG produced', bt_trg_sents[i])
+        #     print('TRG desired', trg_sents[i])
+        #     print('SRC produced', bt_src_sents[i])
+        #     print('SRC desired', src_sents[i])
+        #     print()
+
+        self.train_scores['src_to_trg_bleu'].append(compute_bleu_for_sents(bt_trg_sents, trg_sents))
+        self.train_scores['trg_to_src_bleu'].append(compute_bleu_for_sents(bt_src_sents, src_sents))
+
         bt_trg = pad_to_longest(bt_trg)
         bt_src = pad_to_longest(bt_src)
 
@@ -274,35 +298,62 @@ class Trainer:
 
         return gen_loss_src, gen_loss_trg
 
-    def plot_losses(self):
+    def plot_scores(self):
         clear_output(True)
 
         losses_pairs = [
             ('dae_loss_src', 'dae_loss_trg'),
             ('loss_bt_src', 'loss_bt_trg'),
             ('discr_loss_src', 'discr_loss_trg'),
-            ('gen_loss_src', 'gen_loss_trg'),
-            ('src_to_trg_translation', 'trg_to_src_translation')
+            ('gen_loss_src', 'gen_loss_trg')
         ]
 
         for src, trg in losses_pairs:
-            if len(self.losses[src]) == 0 or len(self.losses[trg]) == 0:
+            if len(self.train_scores[src]) == 0 or len(self.train_scores[trg]) == 0:
                 continue
 
             plt.figure(figsize=[16,4])
 
             plt.subplot(121)
-            plt.title(LOSSES_TITLES[src])
-            plt.plot(self.losses[src])
-            plt.plot(pd.DataFrame(self.losses[src]).ewm(span=100).mean())
-            plt.plot(self.val_iters[src], self.val_losses[src])
+            plt.title(SCORES_TITLES[src])
+            plt.plot(self.train_scores[src])
+            plt.plot(pd.DataFrame(self.train_scores[src]).ewm(span=100).mean())
+            plt.plot(self.val_iters[src], self.val_scores[src])
             plt.grid()
 
             plt.subplot(122)
-            plt.title(LOSSES_TITLES[trg])
-            plt.plot(self.losses[trg])
-            plt.plot(pd.DataFrame(self.losses[trg]).ewm(span=100).mean())
-            plt.plot(self.val_iters[trg], self.val_losses[trg])
+            plt.title(SCORES_TITLES[trg])
+            plt.plot(self.train_scores[trg])
+            plt.plot(pd.DataFrame(self.train_scores[trg]).ewm(span=100).mean())
+            plt.plot(self.val_iters[trg], self.val_scores[trg])
             plt.grid()
 
+        # We have two additional plots: train BLEU and validation CE
+        self.make_plots_for_bleu_and_translation_val()
+
         plt.show()
+
+    # TODO: just add display style parameter: single/paired
+    def make_plots_for_bleu_and_translation_val(self):
+        if not self.val_scores['src_to_trg_translation'] and not self.train_scores['src_to_trg_bleu']:
+            # We have nothing to display :(
+            return
+
+        plt.figure(figsize=[16,4])
+
+        if self.train_scores['src_to_trg_bleu']:
+            src, trg = 'src_to_trg_bleu', 'trg_to_src_bleu'
+            iters = np.arange(self.start_bt_from_iter, self.start_bt_from_iter + len(self.train_scores[src]))
+            plt.subplot(121)
+            plt.title('Train BLEU score')
+            plt.plot(iters, self.train_scores[src], label=SCORES_TITLES[src])
+            plt.plot(iters, self.train_scores[trg], label=SCORES_TITLES[trg])
+            plt.grid()
+
+        if self.val_scores['src_to_trg_translation']:
+            src, trg = 'src_to_trg_translation', 'trg_to_src_translation'
+            plt.subplot(122)
+            plt.title('Val translation loss')
+            plt.plot(self.val_iters[src], self.val_scores[src], label=SCORES_TITLES[src])
+            plt.plot(self.val_iters[trg], self.val_scores[trg], label=SCORES_TITLES[trg])
+            plt.grid()
