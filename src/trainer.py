@@ -32,7 +32,7 @@ SCORES_TITLES = {
 
 class Trainer:
     def __init__(self, transformer, discriminator, vocab_src, vocab_trg,
-                 transformer_optimizer, discriminator_optimizer, transformer_bt_optimizer,
+                 transformer_optimizer, discriminator_optimizer,
                  reconstruct_src_criterion, reconstruct_trg_criterion, adv_criterion, config):
 
         self.transformer = transformer
@@ -40,7 +40,6 @@ class Trainer:
         self.vocab_src = vocab_src
         self.vocab_trg = vocab_trg
         self.transformer_optimizer = transformer_optimizer
-        self.transformer_bt_optimizer = transformer_bt_optimizer
         self.discriminator_optimizer = discriminator_optimizer
         self.reconstruct_src_criterion = reconstruct_src_criterion
         self.reconstruct_trg_criterion = reconstruct_trg_criterion
@@ -60,6 +59,9 @@ class Trainer:
         self.max_num_epochs = config.get('max_num_epochs', 100)
         self.start_bt_from_iter = config.get('start_bt_from_iter', 500)
         self.max_seq_len = config.get('max_seq_len', 50)
+
+        self.alternate_adv_training = config.get('alternate_adv_training', False)
+        self.alternate_adv_training_iters = config.get('alternate_adv_training_iters', 100)
 
         self.train_scores = {
             'dae_loss_src': [],
@@ -106,6 +108,7 @@ class Trainer:
     def train_on_batch(self, batch):
         src_noised, trg_noised, src, trg = batch
         should_backtranslate = self.num_iters_done >= self.start_bt_from_iter
+        should_train_generator = (self.num_iters_done // self.alternate_adv_training_iters) % 2 == 1
         total_transformer_loss = 0
         total_discriminator_loss = 0
 
@@ -133,19 +136,20 @@ class Trainer:
 
         # Generator step
         gen_loss_src, gen_loss_trg = self._run_generator(*domains_predictions)
-        total_transformer_loss += (gen_loss_src + gen_loss_trg)
-        self.transformer_optimizer.step()
+        if self.alternate_adv_training and should_train_generator:
+            total_transformer_loss += (gen_loss_src + gen_loss_trg)
         self.train_scores['gen_loss_src'].append(gen_loss_src.data[0])
         self.train_scores['gen_loss_trg'].append(gen_loss_trg.data[0])
-        
+
         # Backward passes
         self.transformer_optimizer.zero_grad()
         total_transformer_loss.backward(retain_graph=True)
         self.transformer_optimizer.step()
-        
-        self.discriminator_optimizer.zero_grad()
-        total_discriminator_loss.backward()
-        self.discriminator_optimizer.step()
+
+        if self.alternate_adv_training and not should_train_generator:
+            self.discriminator_optimizer.zero_grad()
+            total_discriminator_loss.backward()
+            self.discriminator_optimizer.step()
 
     def eval_on_batch(self, batch):
         src_noised, trg_noised, src, trg = batch
