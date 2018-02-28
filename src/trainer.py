@@ -23,8 +23,8 @@ SCORES_TITLES = {
     'discr_loss_trg': '[trg] lang discriminator loss',
     'gen_loss_src': '[src] lang generator loss',
     'gen_loss_trg': '[trg] lang generator loss',
-    'src_to_trg_translation': '[src->trg] translation loss',
-    'trg_to_src_translation': '[trg->src] translation loss',
+    'src_to_trg_translation_bleu': '[src->trg] Translation BLEU',
+    'trg_to_src_translation_bleu': '[trg->src] Translation BLEU',
     'src_to_trg_bleu': '[src->trg] BLEU score',
     'trg_to_src_bleu': '[trg->src] BLEU score',
 }
@@ -59,9 +59,7 @@ class Trainer:
         self.max_num_epochs = config.get('max_num_epochs', 100)
         self.start_bt_from_iter = config.get('start_bt_from_iter', 500)
         self.max_seq_len = config.get('max_seq_len', 50)
-
-        self.alternate_adv_training = config.get('alternate_adv_training', False)
-        self.alternate_adv_training_iters = config.get('alternate_adv_training_iters', 100)
+        self.gen_loss_coef = config.get('gen_loss_coef', 0.1)
 
         self.train_scores = {
             'dae_loss_src': [],
@@ -81,34 +79,38 @@ class Trainer:
         self.val_iters = deepcopy(self.train_scores)
 
         # Additionally, we have val scores for translation CE
-        self.val_scores['src_to_trg_translation'] = []
-        self.val_scores['trg_to_src_translation'] = []
-        self.val_iters['src_to_trg_translation'] = []
-        self.val_iters['trg_to_src_translation'] = []
+        self.val_scores['src_to_trg_translation_bleu'] = []
+        self.val_scores['trg_to_src_translation_bleu'] = []
+        self.val_iters['src_to_trg_translation_bleu'] = []
+        self.val_iters['trg_to_src_translation_bleu'] = []
 
     def run_training(self, training_data, val_data, translation_val_data,
-                     plot_every=50, val_translate_every=100):
+                     plot_every=50, val_bleu_every=500):
         should_continue = True
 
         while self.num_epochs_done < self.max_num_epochs and should_continue:
-            self.validate(val_data)
-
-            for batch in tqdm(training_data, leave=False):
-                try:
+            try:
+                #self.validate(val_data)
+                t = tqdm(training_data).__enter__()
+                for batch in t:
                     self.train_on_batch(batch)
-                    if self.num_iters_done % val_translate_every == 0: self.validate_translation(translation_val_data)
+                    if self.num_iters_done % val_bleu_every == 0: self.validate_bleu(translation_val_data)
                     if self.num_iters_done % plot_every == 0: self.plot_scores()
                     self.num_iters_done += 1
-                except KeyboardInterrupt:
-                    should_continue = False
-                    break
+
+                    # Print iter info
+                    t.set_description('Num iters done: {}/{}. Current epoch: {}'.format(
+                        self.num_iters_done, len(t) * self.max_num_epochs, self.num_epochs_done))
+
+            except KeyboardInterrupt:
+                should_continue = False
+                break
 
             self.num_epochs_done += 1
 
     def train_on_batch(self, batch):
         src_noised, trg_noised, src, trg = batch
         should_backtranslate = self.num_iters_done >= self.start_bt_from_iter
-        should_train_generator = (self.num_iters_done // self.alternate_adv_training_iters) % 2 == 1
         total_transformer_loss = 0
         total_discriminator_loss = 0
 
@@ -128,7 +130,7 @@ class Trainer:
             self.train_scores['loss_bt_trg'].append(loss_bt_trg.data[0])
 
         # Discriminator step
-        losses, domains_predictions = self._run_discriminator(*encodings)
+        losses, domains_predictions = self._run_discriminator(src_noised, trg_noised, *encodings)
         discr_loss_src, discr_loss_trg = losses
         total_discriminator_loss += (discr_loss_src + discr_loss_trg)
         self.train_scores['discr_loss_src'].append(discr_loss_src.data[0])
@@ -136,8 +138,7 @@ class Trainer:
 
         # Generator step
         gen_loss_src, gen_loss_trg = self._run_generator(*domains_predictions)
-        if self.alternate_adv_training and should_train_generator:
-            total_transformer_loss += (gen_loss_src + gen_loss_trg)
+        total_transformer_loss += (gen_loss_src + gen_loss_trg) * self.gen_loss_coef
         self.train_scores['gen_loss_src'].append(gen_loss_src.data[0])
         self.train_scores['gen_loss_trg'].append(gen_loss_trg.data[0])
 
@@ -146,10 +147,9 @@ class Trainer:
         total_transformer_loss.backward(retain_graph=True)
         self.transformer_optimizer.step()
 
-        if self.alternate_adv_training and not should_train_generator:
-            self.discriminator_optimizer.zero_grad()
-            total_discriminator_loss.backward()
-            self.discriminator_optimizer.step()
+        self.discriminator_optimizer.zero_grad()
+        total_discriminator_loss.backward()
+        self.discriminator_optimizer.step()
 
     def eval_on_batch(self, batch):
         src_noised, trg_noised, src, trg = batch
@@ -159,12 +159,12 @@ class Trainer:
         self.discriminator.eval()
 
         # DAE step
-        losses, encodings = self._run_dae(src_noised, trg_noised, src, trg)
-        dae_loss_src, dae_loss_trg = losses
-        self.val_scores['dae_loss_src'].append(dae_loss_src.data[0])
-        self.val_scores['dae_loss_trg'].append(dae_loss_trg.data[0])
-        self.val_iters['dae_loss_src'].append(self.num_iters_done)
-        self.val_iters['dae_loss_trg'].append(self.num_iters_done)
+        #losses, encodings = self._run_dae(src_noised, trg_noised, src, trg)
+        #dae_loss_src, dae_loss_trg = losses
+        #self.val_scores['dae_loss_src'].append(dae_loss_src.data[0])
+        #self.val_scores['dae_loss_trg'].append(dae_loss_trg.data[0])
+        #self.val_iters['dae_loss_src'].append(self.num_iters_done)
+        #self.val_iters['dae_loss_trg'].append(self.num_iters_done)
 
         # (Back) translation step
         if should_backtranslate:
@@ -175,7 +175,7 @@ class Trainer:
             self.val_iters['loss_bt_trg'].append(self.num_iters_done)
 
         # Discriminator step
-        losses, domains_predictions = self._run_discriminator(*encodings)
+        losses, domains_predictions = self._run_discriminator(src_noised, trg_noised, *encodings)
         discr_loss_src, discr_loss_trg = losses
         self.val_scores['discr_loss_src'].append(discr_loss_src.data[0])
         self.val_scores['discr_loss_trg'].append(discr_loss_trg.data[0])
@@ -193,26 +193,38 @@ class Trainer:
         for val_batch in val_data:
             self.eval_on_batch(val_batch)
 
-    def validate_translation(self, val_data):
-        val_losses_src_to_trg = []
-        val_losses_trg_to_src = []
+    def validate_bleu(self, val_data, return_translations=False):
+        all_translations_src_to_trg = []
+        all_translations_trg_to_src = []
+        all_targets_src_to_trg = []
+        all_targets_trg_to_src = []
 
-        for val_batch in val_data:
-            val_src, val_trg = val_batch
+        for batch in val_data:
+            translations_src_to_trg = self.transformer.translate_batch(batch[0], max_len=self.max_seq_len, beam_size=4)
+            translations_trg_to_src = self.transformer.translate_batch(batch[1], max_len=self.max_seq_len, beam_size=4,
+                                                                       use_src_embs_in_decoder=True,
+                                                                       use_trg_embs_in_encoder=True)
 
-            val_pred_trg = self.transformer(val_src, val_trg)
-            val_pred_src = self.transformer(val_trg, val_src, use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
+            all_translations_src_to_trg += token_ids_to_sents(translations_src_to_trg, self.vocab_trg)
+            all_translations_trg_to_src += token_ids_to_sents(translations_trg_to_src, self.vocab_src)
+            all_targets_src_to_trg += token_ids_to_sents(batch[1], self.vocab_trg)
+            all_targets_trg_to_src += token_ids_to_sents(batch[0], self.vocab_src)
 
-            val_loss_src_to_trg = self.reconstruct_trg_criterion(val_pred_trg, val_trg[:, 1:].contiguous().view(-1))
-            val_loss_trg_to_src = self.reconstruct_src_criterion(val_pred_src, val_src[:, 1:].contiguous().view(-1))
+        bleu_src_to_trg = compute_bleu_for_sents(all_translations_src_to_trg, all_targets_src_to_trg)
+        bleu_trg_to_src = compute_bleu_for_sents(all_translations_trg_to_src, all_targets_trg_to_src)
 
-            val_losses_src_to_trg.append(val_loss_src_to_trg.data[0])
-            val_losses_trg_to_src.append(val_loss_trg_to_src.data[0])
+        self.val_scores['src_to_trg_translation_bleu'].append(np.mean(bleu_src_to_trg))
+        self.val_scores['trg_to_src_translation_bleu'].append(np.mean(bleu_trg_to_src))
+        self.val_iters['src_to_trg_translation_bleu'].append(self.num_iters_done)
+        self.val_iters['trg_to_src_translation_bleu'].append(self.num_iters_done)
 
-        self.val_scores['src_to_trg_translation'].append(np.mean(val_losses_src_to_trg))
-        self.val_scores['trg_to_src_translation'].append(np.mean(val_losses_trg_to_src))
-        self.val_iters['src_to_trg_translation'].append(self.num_iters_done)
-        self.val_iters['trg_to_src_translation'].append(self.num_iters_done)
+        if return_translations:
+            return {
+                'all_translations_src_to_trg': all_translations_src_to_trg,
+                'all_translations_trg_to_src': all_translations_trg_to_src,
+                'all_targets_src_to_trg': all_targets_src_to_trg,
+                'all_targets_trg_to_src': all_targets_trg_to_src
+            }
 
     def _run_dae(self, src_noised, trg_noised, src, trg):
         # Computing translation for ~src->src and ~trg->trg autoencoding tasks
@@ -226,32 +238,32 @@ class Trainer:
         return (dae_loss_src, dae_loss_trg), (encodings_src, encodings_trg)
 
     def _run_bt(self, src, trg):
-        self.transformer.eval()
-        # Get translations for backtranslation
-        bt_trg = self.transformer.translate_batch(src, beam_size=2, max_len=self.max_seq_len-2)
-        bt_src = self.transformer.translate_batch(trg, beam_size=2, max_len=self.max_seq_len-2,
-                                                  use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
+        #         self.transformer.eval()
+        #         # Get translations for backtranslation
+        #         bt_trg = self.transformer.translate_batch(src, beam_size=2, max_len=self.max_seq_len-2)
+        #         bt_src = self.transformer.translate_batch(trg, beam_size=2, max_len=self.max_seq_len-2,
+        #                                                  use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
 
-        # We should prepend our sentences with BOS symbol
-        bt_trg = [[constants.BOS] + s for s in bt_trg]
-        bt_src = [[constants.BOS] + s for s in bt_src]
+        #         # We should prepend our sentences with BOS symbol
+        #         bt_trg = [[constants.BOS] + s for s in bt_trg]
+        #         bt_src = [[constants.BOS] + s for s in bt_src]
 
-        # It's a good opportunity for us to measure BLEU score
-        bt_trg_sents = token_ids_to_sents(bt_trg, self.vocab_trg)
-        bt_src_sents = token_ids_to_sents(bt_src, self.vocab_src)
-        src_sents = token_ids_to_sents(src, self.vocab_src)
-        trg_sents = token_ids_to_sents(trg, self.vocab_trg)
+        #         # It's a good opportunity for us to measure BLEU score
+        #         bt_trg_sents = token_ids_to_sents(bt_trg, self.vocab_trg)
+        #         bt_src_sents = token_ids_to_sents(bt_src, self.vocab_src)
+        #         src_sents = token_ids_to_sents(src, self.vocab_src)
+        #         trg_sents = token_ids_to_sents(trg, self.vocab_trg)
 
-        self.train_scores['src_to_trg_bleu'].append(compute_bleu_for_sents(bt_trg_sents, trg_sents))
-        self.train_scores['trg_to_src_bleu'].append(compute_bleu_for_sents(bt_src_sents, src_sents))
+        #         self.train_scores['src_to_trg_bleu'].append(compute_bleu_for_sents(bt_trg_sents, trg_sents))
+        #         self.train_scores['trg_to_src_bleu'].append(compute_bleu_for_sents(bt_src_sents, src_sents))
 
-        bt_trg = pad_to_longest(bt_trg)
-        bt_src = pad_to_longest(bt_src)
+        #         bt_trg = pad_to_longest(bt_trg)
+        #         bt_src = pad_to_longest(bt_src)
 
         # Computing predictions for back-translated sentences
         self.transformer.train()
-        bt_src_preds = self.transformer(bt_trg, src, use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
-        bt_trg_preds = self.transformer(bt_src, trg)
+        bt_src_preds = self.transformer(trg, src, use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
+        bt_trg_preds = self.transformer(src, trg)
 
         # Computing losses
         loss_bt_src = self.reconstruct_src_criterion(bt_src_preds, src[:, 1:].contiguous().view(-1))
@@ -259,9 +271,16 @@ class Trainer:
 
         return loss_bt_src, loss_bt_trg
 
-    def _run_discriminator(self, encodings_src, encodings_trg):
-        domains_preds_src = self.discriminator(encodings_src.view(-1, 512)).view(-1)
-        domains_preds_trg = self.discriminator(encodings_trg.view(-1, 512)).view(-1)
+    def _run_discriminator(self, src_noised, trg_noised, encodings_src, encodings_trg):
+        # We should pick elements which are not PADs
+        indices_src = Variable(src_noised.data.ne(constants.PAD).view(-1).nonzero().squeeze())
+        indices_trg = Variable(trg_noised.data.ne(constants.PAD).view(-1).nonzero().squeeze())
+        
+        inputs_src = encodings_src.view(-1, 512).index_select(0, indices_src)
+        inputs_trg = encodings_trg.view(-1, 512).index_select(0, indices_trg)
+
+        domains_preds_src = self.discriminator(inputs_src).view(-1)
+        domains_preds_trg = self.discriminator(inputs_trg).view(-1)
 
         # Generating targets for discriminator
         true_domains_src = Variable(torch.Tensor([0] * len(domains_preds_src)))
@@ -328,7 +347,7 @@ class Trainer:
 
     # TODO: just add display style parameter: single/paired
     def make_plots_for_bleu_and_translation_val(self):
-        if not self.val_scores['src_to_trg_translation'] and not self.train_scores['src_to_trg_bleu']:
+        if not self.val_scores['src_to_trg_translation_bleu'] and not self.train_scores['src_to_trg_bleu']:
             # We have nothing to display :(
             return
 
@@ -345,10 +364,10 @@ class Trainer:
             plt.grid()
             plt.legend()
 
-        if self.val_scores['src_to_trg_translation']:
-            src, trg = 'src_to_trg_translation', 'trg_to_src_translation'
+        if self.val_scores['src_to_trg_translation_bleu']:
+            src, trg = 'src_to_trg_translation_bleu', 'trg_to_src_translation_bleu'
             plt.subplot(122)
-            plt.title('Val translation loss')
+            plt.title('Val translation BLEU')
             plt.plot(self.val_iters[src], self.val_scores[src], label=SCORES_TITLES[src])
             plt.plot(self.val_iters[trg], self.val_scores[trg], label=SCORES_TITLES[trg])
             plt.grid()

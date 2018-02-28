@@ -65,7 +65,6 @@ class UMTBatcher(object):
     def next(self):
         if self._iter_count < self._n_batch:
             batch_idx = self._iter_count
-            self._iter_count += 1
 
             start_idx = batch_idx * self._batch_size
             end_idx = (batch_idx + 1) * self._batch_size
@@ -86,6 +85,8 @@ class UMTBatcher(object):
             trg_noised = pad_to_longest(trg_noised)
             src = pad_to_longest(src)
             trg = pad_to_longest(trg)
+            
+            self._iter_count += 1
 
             return src_noised, trg_noised, src, trg
         else:
