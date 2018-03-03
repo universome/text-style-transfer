@@ -1,4 +1,5 @@
 ''' Define the Layers '''
+import torch
 import torch.nn as nn
 from transformer.sub_layers import MultiHeadAttention, PositionwiseFeedForward
 
@@ -28,11 +29,20 @@ class DecoderLayer(nn.Module):
         self.enc_attn = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
         self.pos_ffn = PositionwiseFeedForward(d_model, d_inner_hid, dropout=dropout)
 
-    def forward(self, dec_input, enc_output, slf_attn_mask=None, dec_enc_attn_mask=None):
-        dec_output, dec_slf_attn = self.slf_attn(
-            dec_input, dec_input, dec_input, attn_mask=slf_attn_mask)
-        dec_output, dec_enc_attn = self.enc_attn(
+    def forward(self, dec_input, enc_output, slf_attn_mask=None,
+                dec_enc_attn_mask=None, compute_only_last=False):
+
+        if compute_only_last:
+            # If we have cache — all sequence except the last element is already computed
+            # So we should compute just one last element (for each seq in a batch)
+            slf_attn_q = dec_input[:, -1].unsqueeze(1)
+        else:
+            slf_attn_q = dec_input
+
+        dec_output, _ = self.slf_attn(
+            slf_attn_q, dec_input, dec_input, attn_mask=slf_attn_mask)
+        dec_output, _ = self.enc_attn(
             dec_output, enc_output, enc_output, attn_mask=dec_enc_attn_mask)
         dec_output = self.pos_ffn(dec_output)
 
-        return dec_output, dec_slf_attn, dec_enc_attn
+        return dec_output

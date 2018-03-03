@@ -5,6 +5,8 @@
     https://github.com/OpenNMT/OpenNMT-py/blob/master/onmt/Beam.py
 """
 
+from time import time
+
 import torch
 import numpy as np
 import transformer.constants as constants
@@ -24,11 +26,13 @@ class Beam(object):
         self.all_scores = []
 
         # The backpointers at each time-step.
-        self.prev_ks = []
+        # Here we keep which beams from the previous time-step we used
+        # to continue the current beam
+        self.beam_ancestors = []
 
         # The outputs at each time-step.
-        self.next_ys = [self.tt.LongTensor(size).fill_(constants.PAD)]
-        self.next_ys[0][0] = constants.BOS
+        self.next_words = [self.tt.LongTensor(size).fill_(constants.PAD)]
+        self.next_words[0][0] = constants.BOS
 
     def get_current_state(self):
         "Get the outputs for the current timestep."
@@ -36,34 +40,33 @@ class Beam(object):
 
     def get_current_origin(self):
         "Get the backpointers for the current timestep."
-        return self.prev_ks[-1]
+        return self.beam_ancestors[-1]
 
     def advance(self, word_lk):
         "Update the status and check for finished or not."
-        num_words = word_lk.size(1)
+        vocab_size = word_lk.size(1)
 
         # Sum the previous scores.
-        if len(self.prev_ks) > 0:
+        if len(self.beam_ancestors) > 0:
             beam_lk = word_lk + self.scores.unsqueeze(1).expand_as(word_lk)
         else:
-            beam_lk = word_lk[0]
+            beam_lk = word_lk[0] # Taking seq, which we started with BOS
 
         flat_beam_lk = beam_lk.view(-1)
 
-        best_scores, best_scores_id = flat_beam_lk.topk(self.size, 0, True, True) # 1st sort
-        best_scores, best_scores_id = flat_beam_lk.topk(self.size, 0, True, True) # 2nd sort
+        best_scores, best_scores_ids = flat_beam_lk.topk(self.size)
 
         self.all_scores.append(self.scores)
         self.scores = best_scores
 
-        # bestScoresId is flattened beam x word array, so calculate which
-        # word and beam each score came from
-        prev_k = best_scores_id / num_words
-        self.prev_ks.append(prev_k)
-        self.next_ys.append(best_scores_id - prev_k * num_words)
+        # best_scores_ids is flattened [beam_size x vocab_size] array,
+        # so calculate which word and beam each best score came from
+        prev_k = best_scores_ids / vocab_size
+        self.beam_ancestors.append(prev_k)
+        self.next_words.append(best_scores_ids - prev_k * vocab_size)
 
         # End condition is when top-of-beam is EOS.
-        if self.next_ys[-1][0] == constants.EOS:
+        if self.next_words[-1][0] == constants.EOS:
             self.done = True
             self.all_scores.append(self.scores)
 
@@ -76,13 +79,13 @@ class Beam(object):
     def get_the_best_score_and_idx(self):
         "Get the score of the best in the beam."
         scores, ids = self.sort_scores()
-        return scores[1], ids[1]
+        return scores[0], ids[0]
 
     def get_tentative_hypothesis(self):
         "Get the decoded sequence for the current timestep."
 
-        if len(self.next_ys) == 1:
-            dec_seq = self.next_ys[0].unsqueeze(1)
+        if len(self.next_words) == 1:
+            dec_seq = self.next_words[0].unsqueeze(1)
         else:
             _, keys = self.sort_scores()
             hyps = [self.get_hypothesis(k) for k in keys]
@@ -95,18 +98,16 @@ class Beam(object):
         """
         Walk back to construct the full hypothesis.
 
-        Parameters.
-
-             * `k` - the position in the beam to construct.
-
-         Returns.
-
-            1. The hypothesis
-            2. The attention at each time step.
+        Parameters:
+            * `k` - the position in the beam to construct.
+        Returns:
+            * The hypothesis
         """
         hyp = []
-        for j in range(len(self.prev_ks) - 1, -1, -1):
-            hyp.append(self.next_ys[j+1][k])
-            k = self.prev_ks[j][k]
+        for j in range(len(self.beam_ancestors) - 1, -1, -1):
+            hyp.append(self.next_words[j+1][k])
+            k = self.beam_ancestors[j][k]
 
-        return hyp[::-1]
+        hyp = hyp[::-1] # reversing
+
+        return hyp

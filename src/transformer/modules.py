@@ -43,16 +43,15 @@ class LayerNormalization(nn.Module):
         self.a_2 = nn.Parameter(torch.ones(d_hid), requires_grad=True)
         self.b_2 = nn.Parameter(torch.zeros(d_hid), requires_grad=True)
 
-    def forward(self, z):
-        if z.size(1) == 1:
-            return z
+    def forward(self, x):
+        # if x.size(1) == 1: return x
 
-        mu = torch.mean(z, keepdim=True, dim=-1)
-        sigma = torch.std(z, keepdim=True, dim=-1)
-        ln_out = (z - mu.expand_as(z)) / (sigma.expand_as(z) + self.eps)
-        ln_out = ln_out * self.a_2.expand_as(ln_out) + self.b_2.expand_as(ln_out)
+        mu = torch.mean(x, keepdim=True, dim=-1)
+        sigma = torch.std(x, keepdim=True, dim=-1)
+        out = (x - mu.expand_as(x)) / (sigma.expand_as(x) + self.eps)
+        out = out * self.a_2.expand_as(out) + self.b_2.expand_as(out)
 
-        return ln_out
+        return out
 
 class BatchBottle(nn.Module):
     ''' Perform the reshape routine before and after an operation '''
@@ -78,20 +77,24 @@ class ScaledDotProductAttention(nn.Module):
         self.softmax = BottleSoftmax(dim=1)
 
     def forward(self, q, k, v, attn_mask=None):
-
         attn = torch.bmm(q, k.transpose(1, 2)) / self.temper
 
         if attn_mask is not None:
-
             assert attn_mask.size() == attn.size(), \
                     'Attention mask shape {} mismatch ' \
                     'with Attention logit tensor shape ' \
                     '{}.'.format(attn_mask.size(), attn.size())
 
-            attn.data.masked_fill_(attn_mask, -float('inf'))
+            attn.data.masked_fill_(attn_mask, float('-inf'))
 
         attn = self.softmax(attn)
         attn = self.dropout(attn)
-        output = torch.bmm(attn, v)
 
-        return output, attn
+        if attn_mask is not None:
+            # Replacing NaNs with zeros
+            # We could not do it previously cause it will change our attention scores
+            attn.data.masked_fill_(attn_mask, 0)
+
+        outputs = torch.bmm(attn, v)
+
+        return outputs, attn
