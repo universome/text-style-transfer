@@ -310,10 +310,10 @@ class Transformer(nn.Module):
             # Update the remaining size
             if len(active_seq_idxs) == 0: break
 
-            active_translations = update_layer_outputs(translations, active_seq_idxs, batch_size)
+            active_translations = update_layer_outputs(translations, active_seq_idxs, batch_size, volatile=False)
 
             # Remove source sentences that are completely translated
-            src_seq = update_active_seq(src_seq, active_seq_idxs, n_remaining_sents, volatile=False)
+            src_seq = update_active_seq(src_seq, active_seq_idxs, n_remaining_sents)
             enc_output = update_layer_outputs(enc_output, active_seq_idxs, n_remaining_sents, volatile=False)
 
             # Remove decoder states which are not active anymore
@@ -378,7 +378,7 @@ def get_attn_subsequent_mask(seq):
 
 def get_positions_for_seqs(seqs, **kwargs):
     positions = [get_positions_for_seq(seq, **kwargs) for seq in seqs]
-    positions = Variable(torch.LongTensor(positions))
+    positions = Variable(torch.LongTensor(positions), requires_grad=False)
     if use_cuda: positions = positions.cuda()
 
     return positions
@@ -407,7 +407,7 @@ def update_active_seq(seq_var, active_seq_idxs, n_remaining_sents, volatile=True
     active_seq_data = original_seq_data.index_select(0, active_seq_idxs)
     active_seq_data = active_seq_data.view(*new_size)
 
-    return Variable(active_seq_data, volatile=False) # TODO: volatile!
+    return Variable(active_seq_data, volatile=volatile)
 
 
 def update_layer_outputs(enc_info_var, active_seq_idxs, n_remaining_sents, volatile=True):
@@ -427,7 +427,7 @@ def update_layer_outputs(enc_info_var, active_seq_idxs, n_remaining_sents, volat
 
     # print(enc_info_var.size(), active_enc_info_data.size(), active_seq_idxs.size())
 
-    return Variable(active_enc_info_data, volatile=False) # TODO: volatile!
+    return Variable(active_enc_info_data, volatile=volatile)
 
 
 def extract_best_translation_from_beams(beams):
@@ -497,7 +497,7 @@ def extend_inactive_with_pads(samples, active_seq_idx, batch_size):
 
     # We should distribute our samples according their indices (active_seq_idx)
     # And other staff we should fill with constants.PAD (one-hotted)
-    pad_idx = Variable(torch.LongTensor([constants.PAD]))
+    pad_idx = Variable(torch.LongTensor([constants.PAD]), requires_grad=False)
     outputs = Variable(torch.zeros(batch_size, samples.size(1)))
 
     if use_cuda:
