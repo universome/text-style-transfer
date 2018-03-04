@@ -23,8 +23,6 @@ def gentle_shuffle(seq, window_size=3):
     permutation = list(range(len(seq)))
     swap_prob = 1 / (window_size * 2 + 1)
 
-    #print('Before:', permutation)
-
     for i in range(len(seq)):
         if permutation[i] != i: continue # Already swapped
 
@@ -35,7 +33,5 @@ def gentle_shuffle(seq, window_size=3):
         if permutation[swap] != swap: continue # We shouldn't swap a swapped element
 
         permutation[i], permutation[swap] = swap, i
-
-    #print('After: ', permutation)
 
     return [seq[i] for i in permutation]

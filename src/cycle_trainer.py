@@ -102,15 +102,15 @@ class CycleTrainer:
     def train_on_batch(self, batch):
         src, trg = batch
         # Normal forward pass
-        preds_src_to_trg = self.transformer_src_to_trg.differentiable_translate(src, self.vocab_trg, max_len=30)
-        preds_trg_to_src = self.transformer_trg_to_src.differentiable_translate(trg, self.vocab_src, max_len=30)
+        preds_src_to_trg = self.transformer_src_to_trg.differentiable_translate(src, max_len=30)
+        preds_trg_to_src = self.transformer_trg_to_src.differentiable_translate(trg, max_len=30)
 
         # Running our discriminators to predict domains
         # Target discriminator
         true_domains_preds_trg = self.discriminator_trg(trg)
-        fake_domains_preds_trg = self.discriminator_trg(preds_src_to_trg, one_hot_input=True)
+        fake_domains_preds_trg = self.discriminator_trg(preds_src_to_trg)
         true_domains_preds_src = self.discriminator_src(src)
-        fake_domains_preds_src = self.discriminator_src(preds_trg_to_src, one_hot_input=True)
+        fake_domains_preds_src = self.discriminator_src(preds_trg_to_src)
 
         true_domains_y_trg = Variable(torch.zeros(len(trg)))
         fake_domains_y_trg = Variable(torch.ones(len(preds_src_to_trg)))
@@ -141,8 +141,8 @@ class CycleTrainer:
         gen_trg_to_src_loss = self.adv_criterion(fake_domains_preds_src, fake_domains_y_src_for_gen)
 
         # "Back-translation" passes
-        preds_src_to_trg_to_src = self.transformer_trg_to_src(preds_src_to_trg, src, one_hot_src=True)
-        preds_trg_to_src_to_trg = self.transformer_src_to_trg(preds_trg_to_src, trg, one_hot_src=True)
+        preds_src_to_trg_to_src = self.transformer_trg_to_src(preds_src_to_trg, src)
+        preds_trg_to_src_to_trg = self.transformer_src_to_trg(preds_trg_to_src, trg)
 
         # Trying to reconstruct what we have just back-translated
         src_reconstruction_loss = self.reconstruct_src_criterion(preds_src_to_trg_to_src, src[:, 1:].contiguous().view(-1))

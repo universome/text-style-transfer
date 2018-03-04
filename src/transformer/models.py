@@ -11,7 +11,7 @@ import src.transformer.constants as constants
 from src.transformer.modules import BottleLinear as Linear
 from src.transformer.layers import EncoderLayer, DecoderLayer
 from src.transformer.beam import Beam
-from src.utils.common import variable
+from src.utils.common import variable, one_hot_to_ints, embed
 from src.utils.gumbel import gumbel_softmax
 
 
@@ -40,17 +40,15 @@ class Encoder(nn.Module):
             EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
 
-    def forward(self, src_seq, embs=None, one_hot_src=False):
+    def forward(self, src_seq, embs=None):
         # Word embedding look up
-        embs = embs or self.src_word_emb
-        enc_input = torch.matmul(src_seq, embs.weight) if one_hot_src else embs(src_seq)
+        enc_input = embed(src_seq, embs or self.src_word_emb)
 
         # Position Encoding addition
-        positions = get_positions_for_seqs(src_seq, one_hot_input=one_hot_src)
+        positions = get_positions_for_seqs(src_seq)
         enc_input += self.position_enc(positions)
 
-        seq_for_attn = one_hot_seqs_to_seqs(src_seq) if one_hot_src else src_seq
-        enc_slf_attn_mask = get_attn_padding_mask(seq_for_attn, seq_for_attn)
+        enc_slf_attn_mask = get_attn_padding_mask(src_seq, src_seq)
 
         enc_output = enc_input
 
@@ -81,7 +79,7 @@ class Decoder(nn.Module):
             DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
 
-    def forward(self, tgt_seq, src_seq, enc_output, embs=None, cache=None, one_hot_src=False, one_hot_trg=False):
+    def forward(self, tgt_seq, src_seq, enc_output, embs=None, cache=None):
         """
         Arguments:
             - ...
@@ -91,22 +89,17 @@ class Decoder(nn.Module):
 
         # Word embeddings look up
         # TODO: cache this
-        embs = embs or self.tgt_word_emb
-        dec_input = torch.matmul(tgt_seq, embs.weight) if one_hot_trg else embs(tgt_seq)
+        dec_input = embs(tgt_seq) if embs else self.tgt_word_emb(tgt_seq)
 
         # Position Encoding
-        positions = get_positions_for_seqs(tgt_seq, one_hot_input=one_hot_trg)
+        positions = get_positions_for_seqs(tgt_seq)
         dec_input += self.position_enc(positions)
 
         tgt_seq_for_attn = tgt_seq[:,-1].unsqueeze(1) if cache else tgt_seq # Only for the last word
-        tgt_seq_for_attn = one_hot_seqs_to_seqs(tgt_seq_for_attn) if one_hot_trg else tgt_seq_for_attn
-        tgt_seq_k_for_slf_pad_attn = one_hot_seqs_to_seqs(tgt_seq) if one_hot_trg else tgt_seq
-        src_seq_for_attn = one_hot_seqs_to_seqs(src_seq) if one_hot_src else src_seq
-
-        dec_slf_attn_pad_mask = get_attn_padding_mask(tgt_seq_for_attn, tgt_seq_k_for_slf_pad_attn)
+        dec_slf_attn_pad_mask = get_attn_padding_mask(tgt_seq_for_attn, tgt_seq)
         dec_slf_attn_sub_mask = get_attn_subsequent_mask(tgt_seq_for_attn)
         dec_slf_attn_mask = torch.gt(dec_slf_attn_pad_mask + dec_slf_attn_sub_mask, 0)
-        dec_enc_attn_pad_mask = get_attn_padding_mask(tgt_seq_for_attn, src_seq_for_attn)
+        dec_enc_attn_pad_mask = get_attn_padding_mask(tgt_seq_for_attn, src_seq)
 
         dec_output = dec_input
 
@@ -190,16 +183,15 @@ class Transformer(nn.Module):
         return (p for p in trainable if not id(p) in embs_ids)
 
     def forward(self, src, trg, use_trg_embs_in_encoder=False,
-                use_src_embs_in_decoder=False, return_encodings=False,
-                one_hot_src=False, one_hot_trg=False):
+                use_src_embs_in_decoder=False, return_encodings=False):
 
         trg = trg[:, :-1]
         encoder_embs = self.decoder.tgt_word_emb if use_trg_embs_in_encoder else None
         decoder_embs = self.encoder.src_word_emb if use_src_embs_in_decoder else None
         proj = self.src_word_proj if use_src_embs_in_decoder else self.tgt_word_proj
 
-        enc_output, *_ = self.encoder(src, embs=encoder_embs, one_hot_src=one_hot_src)
-        dec_output = self.decoder(trg, src, enc_output, embs=decoder_embs, one_hot_src=one_hot_src, one_hot_trg=one_hot_trg)
+        enc_output, *_ = self.encoder(src, embs=encoder_embs)
+        dec_output = self.decoder(trg, src, enc_output, embs=decoder_embs)
         seq_logit = proj(dec_output)
 
         out = seq_logit.view(-1, seq_logit.size(2))
@@ -287,7 +279,7 @@ class Transformer(nn.Module):
         #- Return translations
         return extract_best_translation_from_beams(beams)
 
-    def differentiable_translate(self, src_seq, vocab_trg, max_len=50, temperature=1,
+    def differentiable_translate(self, src_seq, max_len=50, temperature=1,
                                  use_src_embs_in_decoder=False, use_trg_embs_in_encoder=False):
         # TODO: can we use beam search here?
         batch_size = src_seq.size(0)
@@ -297,7 +289,7 @@ class Transformer(nn.Module):
         # So we are not recompute everything from scratch
         cache = init_cache(batch_size, 1, self.decoder.n_layers, self.d_model)
 
-        translations = init_translations(len(vocab_trg), batch_size)
+        translations = variable(torch.ones(batch_size).long().unsqueeze(1) * constants.BOS)
         n_remaining_sents = batch_size
 
         for i in range(max_len-1):
@@ -311,7 +303,7 @@ class Transformer(nn.Module):
             # Update the remaining size
             if len(active_seq_idxs) == 0: break
 
-            active_translations = update_layer_outputs(translations, active_seq_idxs, batch_size, volatile=False)
+            active_translations = update_active_seq(translations, active_seq_idxs, batch_size, volatile=False)
 
             # Remove source sentences that are completely translated
             src_seq = update_active_seq(src_seq, active_seq_idxs, n_remaining_sents)
@@ -324,11 +316,11 @@ class Transformer(nn.Module):
             embs = self.encoder.src_word_emb if use_src_embs_in_decoder else None
             proj = self.src_word_proj if use_src_embs_in_decoder else self.tgt_word_proj
 
-            dec_output = self.decoder(active_translations, src_seq, enc_output, embs=embs, cache=cache, one_hot_trg=True)
+            dec_output = self.decoder(active_translations, src_seq, enc_output, embs=embs, cache=cache)
             logits = proj(dec_output[:, -1, :]) # We need only the last word
             samples_one_hot = gumbel_softmax(logits, temperature)
-            # samples_ints = one_hot_to_ints(samples_one_hot)
-            samples = extend_inactive_with_pads(samples_one_hot, active_seq_idxs, batch_size)
+            samples_ints = one_hot_to_ints(samples_one_hot)
+            samples = populate_inactive_with_pads(samples_ints, active_seq_idxs, batch_size)
             translations = torch.cat((translations, samples.unsqueeze(1)), 1)
 
             n_remaining_sents = active_seq_idxs.size(0)
@@ -379,9 +371,10 @@ def get_attn_subsequent_mask(seq):
 
 
 def get_positions_for_seqs(seqs, **kwargs):
+    assert seqs.dim() == 2
+
     positions = [get_positions_for_seq(seq, **kwargs) for seq in seqs]
-    positions = Variable(torch.LongTensor(positions), requires_grad=False)
-    if use_cuda: positions = positions.cuda()
+    positions = variable(torch.LongTensor(positions), requires_grad=False)
 
     return positions
 
@@ -390,9 +383,8 @@ def get_positions_for_seq(seq, **kwargs):
     return [token_to_position(token, i, **kwargs) for i, token in enumerate(seq.data)]
 
 
-def token_to_position(token, index, one_hot_input=False):
+def token_to_position(token, index):
     if type(token) == Variable: token = token.data
-    if one_hot_input: token = np.argmax(token)
 
     return 0 if token == constants.PAD else index + 1
 
@@ -423,11 +415,8 @@ def update_layer_outputs(enc_info_var, active_seq_idxs, n_remaining_sents, volat
 
     # select the active sequences in batch
     original_enc_info_data = enc_info_var.data.view(n_remaining_sents, -1, vec_size)
-    # print(active_seq_idxs.numpy().tolist(), enc_info_var.size(), original_enc_info_data.size())
     active_enc_info_data = original_enc_info_data.index_select(0, active_seq_idxs)
     active_enc_info_data = active_enc_info_data.view(new_num_repeated_seqs, seq_len, vec_size)
-
-    # print(enc_info_var.size(), active_enc_info_data.size(), active_seq_idxs.size())
 
     return Variable(active_enc_info_data, volatile=volatile)
 
@@ -470,39 +459,16 @@ def init_cache(batch_size, beam_size, n_layers, d_model):
     return [None for _ in range(n_layers)]
 
 
-def init_translations(vocab_size, batch_size):
-    # Creating array of one hot vectors
-    translations = np.zeros((batch_size, 1, vocab_size))
-    translations[:, :, constants.BOS] = 1
+def populate_inactive_with_pads(samples, active_seq_idx, batch_size):
+    # We should distribute our samples according to their real indices (from active_seq_idx)
+    # All other staff (i.e. holes) we should fill with constants.PAD
 
-    # Convert it to pytorch Variable
-    translations = Variable(torch.FloatTensor(translations))
-    if use_cuda: translations = translations.cuda()
-
-    return translations
-
-
-def one_hot_seqs_to_seqs(seqs):
-    seqs = torch.LongTensor([[np.argmax(t.data) for t in s] for s in seqs])
-    if use_cuda: seqs = seqs.cuda()
-
-    return seqs
-
-
-def extend_inactive_with_pads(samples, active_seq_idx, batch_size):
-    assert samples.dim() == 2
+    assert samples.dim() == 1
     assert samples.size(0) == len(active_seq_idx)
 
-    # We should distribute our samples according their indices (active_seq_idx)
-    # And other staff we should fill with constants.PAD (one-hotted)
-    pad_idx = Variable(torch.LongTensor([constants.PAD]), requires_grad=False)
-    outputs = Variable(torch.zeros(batch_size, samples.size(1)))
 
-    if use_cuda:
-        pad_idx = pad_idx.cuda()
-        outputs = outputs.cuda()
-
-    outputs.index_fill_(1, pad_idx, 1)
+    # Create array of constants.PAD
+    outputs = variable(torch.ones(batch_size).long() * constants.PAD)
     outputs[active_seq_idx] = samples
 
     return outputs

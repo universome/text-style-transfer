@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 
-from src.transformer.models import Transformer, one_hot_seqs_to_seqs
+from src.transformer.models import Transformer
 import src.transformer.constants as constants
 
 
@@ -63,15 +63,14 @@ class TransformerClassifier(nn.Module):
     def get_trainable_parameters(self):
         return chain(self.transformer.get_trainable_parameters(), self.dec_out_to_logits.parameters())
 
-    def forward(self, x, use_trg_embs_in_encoder=False, one_hot_input=False):
+    def forward(self, x, use_trg_embs_in_encoder=False):
         pseudo_trg = Variable(torch.LongTensor([[0] for _ in range(x.size(0))]))
         if use_cuda: pseudo_trg = pseudo_trg.cuda()
 
         encoder_embs = self.decoder.tgt_word_emb if use_trg_embs_in_encoder else None
-        src_seq = one_hot_seqs_to_seqs(x) if one_hot_input else x
 
-        enc_output, *_ = self.transformer.encoder(x, embs=encoder_embs, one_hot_src=one_hot_input)
-        dec_output = self.transformer.decoder(pseudo_trg, src_seq, enc_output).squeeze(1)
+        enc_output, *_ = self.transformer.encoder(x, embs=encoder_embs)
+        dec_output = self.transformer.decoder(pseudo_trg, x, enc_output).squeeze(1)
         logits = self.dec_out_to_logits(dec_output).squeeze()
 
         return logits
