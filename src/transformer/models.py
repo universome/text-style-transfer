@@ -3,13 +3,14 @@ from time import time
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.autograd import Variable
 from tqdm import tqdm
 
-import transformer.constants as Constants
-from transformer.modules import BottleLinear as Linear
-from transformer.layers import EncoderLayer, DecoderLayer
-from transformer.beam import Beam
+import src.transformer.constants as constants
+from src.transformer.modules import BottleLinear as Linear
+from src.transformer.layers import EncoderLayer, DecoderLayer
+from src.transformer.beam import Beam
 from src.utils.common import variable
 
 
@@ -29,26 +30,28 @@ class Encoder(nn.Module):
         self.n_max_seq = n_max_seq
         self.d_model = d_model
 
-        self.position_enc = nn.Embedding(n_position, d_word_vec, padding_idx=Constants.PAD)
+        self.position_enc = nn.Embedding(n_position, d_word_vec, padding_idx=constants.PAD)
         self.position_enc.weight.data = position_encoding_init(n_position, d_word_vec)
 
-        self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
+        self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=constants.PAD)
 
         self.layer_stack = nn.ModuleList([
             EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
 
-    def forward(self, src_seq, embs=None):
+    def forward(self, src_seq, embs=None, one_hot_src=False):
         # Word embedding look up
-        enc_input = embs(src_seq) if embs else self.src_word_emb(src_seq)
-        enc_input = enc_input
+        embs = embs or self.src_word_emb
+        enc_input = torch.matmul(src_seq, embs.weight) if one_hot_src else embs(src_seq)
 
         # Position Encoding addition
-        positions = get_positions_for_seqs(src_seq)
+        positions = get_positions_for_seqs(src_seq, one_hot_input=one_hot_src)
         enc_input += self.position_enc(positions)
 
+        seq_for_attn = one_hot_seqs_to_seqs(src_seq) if one_hot_src else src_seq
+        enc_slf_attn_mask = get_attn_padding_mask(seq_for_attn, seq_for_attn)
+
         enc_output = enc_input
-        enc_slf_attn_mask = get_attn_padding_mask(src_seq, src_seq)
 
         for enc_layer in self.layer_stack:
             enc_output, enc_slf_attn = enc_layer(
@@ -68,16 +71,16 @@ class Decoder(nn.Module):
         self.d_model = d_model
         self.n_layers = n_layers
 
-        self.position_enc = nn.Embedding(n_position, d_word_vec, padding_idx=Constants.PAD)
+        self.position_enc = nn.Embedding(n_position, d_word_vec, padding_idx=constants.PAD)
         self.position_enc.weight.data = position_encoding_init(n_position, d_word_vec)
 
-        self.tgt_word_emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=Constants.PAD)
+        self.tgt_word_emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=constants.PAD)
 
         self.layer_stack = nn.ModuleList([
             DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
 
-    def forward(self, tgt_seq, src_seq, enc_output, embs=None, cache=None):
+    def forward(self, tgt_seq, src_seq, enc_output, embs=None, cache=None, one_hot_src=False, one_hot_trg=False):
         """
         Arguments:
             - ...
@@ -87,18 +90,22 @@ class Decoder(nn.Module):
 
         # Word embeddings look up
         # TODO: cache this
-        dec_input = embs(tgt_seq) if embs else self.tgt_word_emb(tgt_seq)
-        dec_input = dec_input
+        embs = embs or self.tgt_word_emb
+        dec_input = torch.matmul(tgt_seq, embs.weight) if one_hot_trg else embs(tgt_seq)
 
         # Position Encoding
-        positions = get_positions_for_seqs(tgt_seq)
+        positions = get_positions_for_seqs(tgt_seq, one_hot_input=one_hot_trg)
         dec_input += self.position_enc(positions)
 
         tgt_seq_for_attn = tgt_seq[:,-1].unsqueeze(1) if cache else tgt_seq # Only for the last word
-        dec_slf_attn_pad_mask = get_attn_padding_mask(tgt_seq_for_attn, tgt_seq)
+        tgt_seq_for_attn = one_hot_seqs_to_seqs(tgt_seq_for_attn) if one_hot_trg else tgt_seq_for_attn
+        tgt_seq_k_for_slf_pad_attn = one_hot_seqs_to_seqs(tgt_seq) if one_hot_trg else tgt_seq
+        src_seq_for_attn = one_hot_seqs_to_seqs(src_seq) if one_hot_src else src_seq
+
+        dec_slf_attn_pad_mask = get_attn_padding_mask(tgt_seq_for_attn, tgt_seq_k_for_slf_pad_attn)
         dec_slf_attn_sub_mask = get_attn_subsequent_mask(tgt_seq_for_attn)
         dec_slf_attn_mask = torch.gt(dec_slf_attn_pad_mask + dec_slf_attn_sub_mask, 0)
-        dec_enc_attn_pad_mask = get_attn_padding_mask(tgt_seq_for_attn, src_seq)
+        dec_enc_attn_pad_mask = get_attn_padding_mask(tgt_seq_for_attn, src_seq_for_attn)
 
         dec_output = dec_input
 
@@ -181,21 +188,24 @@ class Transformer(nn.Module):
 
         return (p for p in trainable if not id(p) in embs_ids)
 
-    def forward(self, src, trg, use_trg_embs_in_encoder=False, use_src_embs_in_decoder=False, return_encodings=False):
+    def forward(self, src, trg, use_trg_embs_in_encoder=False,
+                use_src_embs_in_decoder=False, return_encodings=False,
+                one_hot_src=False, one_hot_trg=False):
+
         trg = trg[:, :-1]
         encoder_embs = self.decoder.tgt_word_emb if use_trg_embs_in_encoder else None
         decoder_embs = self.encoder.src_word_emb if use_src_embs_in_decoder else None
         proj = self.src_word_proj if use_src_embs_in_decoder else self.tgt_word_proj
 
-        enc_output, *_ = self.encoder(src, embs=encoder_embs)
-        dec_output = self.decoder(trg, src, enc_output, embs=decoder_embs)
+        enc_output, *_ = self.encoder(src, embs=encoder_embs, one_hot_src=one_hot_src)
+        dec_output = self.decoder(trg, src, enc_output, embs=decoder_embs, one_hot_src=one_hot_src, one_hot_trg=one_hot_trg)
         seq_logit = proj(dec_output)
 
         out = seq_logit.view(-1, seq_logit.size(2))
 
         return (out, enc_output) if return_encodings else out
 
-    def translate_batch(self, src_seq, beam_size=6, max_len=200,
+    def translate_batch(self, src_seq, beam_size=6, max_len=50,
                         use_src_embs_in_decoder=False, use_trg_embs_in_encoder=False):
 
         batch_size = src_seq.size(0)
@@ -265,16 +275,64 @@ class Transformer(nn.Module):
 
             # Remove source sentences that are completely translated
             src_seq = update_active_seq(src_seq, active_seq_idxs, n_remaining_sents)
-            enc_output = update_layer_outputs(enc_output, active_seq_idxs, n_remaining_sents, self.d_model)
+            enc_output = update_layer_outputs(enc_output, active_seq_idxs, n_remaining_sents)
 
             # Remove decoder states which are not active anymore
-            cache = [update_layer_outputs(layer_cache, active_seq_idxs, n_remaining_sents, self.d_model) for layer_cache in cache]
+            cache = [update_layer_outputs(layer_cache, active_seq_idxs, n_remaining_sents) for layer_cache in cache]
 
             # Update the remaining size
             n_remaining_sents = len(active_seq_idxs)
 
         #- Return translations
         return extract_best_translation_from_beams(beams)
+
+    def differentiable_translate(self, src_seq, vocab_trg, max_len=50, temperature=1,
+                                 use_src_embs_in_decoder=False, use_trg_embs_in_encoder=False):
+        # TODO: can we use beam search here?
+        batch_size = src_seq.size(0)
+        enc_output, *_ = self.encoder(src_seq)
+
+        # Here we are going to keep state of each decoder layer
+        # So we are not recompute everything from scratch
+        cache = init_cache(batch_size, 1, self.decoder.n_layers, self.d_model)
+
+        translations = init_translations(len(vocab_trg), batch_size)
+        n_remaining_sents = batch_size
+
+        for i in range(max_len-1):
+            # Our samples are smooth one hot vectors
+            # We run sequences until EOS is reached
+            # (we determine EOS by argmax(sample) == EOS)
+            active_seq_idxs = [i for i in range(n_remaining_sents) if not (np.argmax(translations[i][-1].data) in (constants.EOS, constants.PAD))]
+            active_seq_idxs = torch.LongTensor(active_seq_idxs)
+            if use_cuda: active_seq_idxs.cuda()
+
+            # Update the remaining size
+            if len(active_seq_idxs) == 0: break
+
+            active_translations = update_layer_outputs(translations, active_seq_idxs, batch_size)
+
+            # Remove source sentences that are completely translated
+            src_seq = update_active_seq(src_seq, active_seq_idxs, n_remaining_sents, volatile=False)
+            enc_output = update_layer_outputs(enc_output, active_seq_idxs, n_remaining_sents, volatile=False)
+
+            # Remove decoder states which are not active anymore
+            if i != 0: cache = [update_layer_outputs(c, active_seq_idxs, n_remaining_sents, volatile=False) for c in cache]
+
+            # -- Decoding -- #
+            embs = self.encoder.src_word_emb if use_src_embs_in_decoder else None
+            proj = self.src_word_proj if use_src_embs_in_decoder else self.tgt_word_proj
+
+            dec_output = self.decoder(active_translations, src_seq, enc_output, embs=embs, cache=cache, one_hot_trg=True)
+            logits = proj(dec_output[:, -1, :]) # We need only the last word
+            samples = sample(logits, temperature)
+            samples = extend_inactive_with_pads(samples, active_seq_idxs, batch_size)
+            translations = torch.cat((translations, samples.unsqueeze(1)), 1)
+
+            n_remaining_sents = active_seq_idxs.size(0)
+
+        #- Return translations
+        return translations
 
 
 def position_encoding_init(max_len, dim):
@@ -295,9 +353,11 @@ def get_attn_padding_mask(seq_q, seq_k):
     ''' Indicate the padding-related part to mask '''
     assert seq_q.dim() == 2 and seq_k.dim() == 2
 
+    if type(seq_k) == Variable: seq_k = seq_k.data
+
     batch_size, len_q = seq_q.size()
     batch_size, len_k = seq_k.size()
-    pad_attn_mask = seq_k.data.eq(Constants.PAD).unsqueeze(1)   # bx1xsk
+    pad_attn_mask = seq_k.eq(constants.PAD).unsqueeze(1)   # bx1xsk
     pad_attn_mask = pad_attn_mask.expand(batch_size, len_q, len_k) # bxsqxsk
 
     return pad_attn_mask
@@ -316,19 +376,26 @@ def get_attn_subsequent_mask(seq):
     return subsequent_mask
 
 
-def get_positions_for_seq(seq):
-    return [i+1 if token != Constants.PAD else 0 for i, token in enumerate(seq.data)]
-
-
-def get_positions_for_seqs(seqs):
-    positions = [get_positions_for_seq(seq) for seq in seqs]
+def get_positions_for_seqs(seqs, **kwargs):
+    positions = [get_positions_for_seq(seq, **kwargs) for seq in seqs]
     positions = Variable(torch.LongTensor(positions))
     if use_cuda: positions = positions.cuda()
 
     return positions
 
 
-def update_active_seq(seq_var, active_seq_idxs, n_remaining_sents):
+def get_positions_for_seq(seq, **kwargs):
+    return [token_to_position(token, i, **kwargs) for i, token in enumerate(seq.data)]
+
+
+def token_to_position(token, index, one_hot_input=False):
+    if type(token) == Variable: token = token.data
+    if one_hot_input: token = np.argmax(token)
+
+    return 0 if token == constants.PAD else index + 1
+
+
+def update_active_seq(seq_var, active_seq_idxs, n_remaining_sents, volatile=True):
     '''Remove the src sequence of finished sequences from the batch. '''
 
     seq_idx_dim_size, *rest_dim_sizes = seq_var.size()
@@ -340,24 +407,27 @@ def update_active_seq(seq_var, active_seq_idxs, n_remaining_sents):
     active_seq_data = original_seq_data.index_select(0, active_seq_idxs)
     active_seq_data = active_seq_data.view(*new_size)
 
-    return Variable(active_seq_data, volatile=True)
+    return Variable(active_seq_data, volatile=False) # TODO: volatile!
 
 
-def update_layer_outputs(enc_info_var, active_seq_idxs, n_remaining_sents, d_model):
+def update_layer_outputs(enc_info_var, active_seq_idxs, n_remaining_sents, volatile=True):
     '''Remove the encoder outputs of finished sequences from the batch. '''
     # TODO(universome): pass beam_size instead of n_remaining_sents
-    seq_len = enc_info_var.size(1)
-    batch_size = enc_info_var.size(0) // n_remaining_sents
-    seq_idx_dim_size, *rest_dim_sizes = enc_info_var.size()
-    seq_idx_dim_size = seq_idx_dim_size * len(active_seq_idxs) // n_remaining_sents
-    new_size = (seq_idx_dim_size, *rest_dim_sizes)
+    assert enc_info_var.dim() == 3
+    assert active_seq_idxs.dim() == 1
+
+    num_repeated_seqs, seq_len, vec_size = enc_info_var.size()
+    new_num_repeated_seqs = num_repeated_seqs * len(active_seq_idxs) // n_remaining_sents
 
     # select the active sequences in batch
-    original_enc_info_data = enc_info_var.data.view(n_remaining_sents, seq_len * batch_size, d_model)
+    original_enc_info_data = enc_info_var.data.view(n_remaining_sents, -1, vec_size)
+    # print(active_seq_idxs.numpy().tolist(), enc_info_var.size(), original_enc_info_data.size())
     active_enc_info_data = original_enc_info_data.index_select(0, active_seq_idxs)
-    active_enc_info_data = active_enc_info_data.view(*new_size)
+    active_enc_info_data = active_enc_info_data.view(new_num_repeated_seqs, seq_len, vec_size)
 
-    return Variable(active_enc_info_data, volatile=True)
+    # print(enc_info_var.size(), active_enc_info_data.size(), active_seq_idxs.size())
+
+    return Variable(active_enc_info_data, volatile=False) # TODO: volatile!
 
 
 def extract_best_translation_from_beams(beams):
@@ -396,3 +466,42 @@ def init_cache(batch_size, beam_size, n_layers, d_model):
     # TODO: torch squeezes this array to the size of [batch_size * beam_size] :|
     # return [torch.zeros(batch_size * beam_size, 0, d_model) for _ in range(n_layers)]
     return [None for _ in range(n_layers)]
+
+
+def init_translations(vocab_size, batch_size):
+    # Creating array of one hot vectors
+    translations = np.zeros((batch_size, 1, vocab_size))
+    translations[:, :, constants.BOS] = 1
+
+    # Convert it to pytorch Variable
+    translations = Variable(torch.FloatTensor(translations))
+    if use_cuda: translations.cuda()
+
+    return translations
+
+
+def one_hot_seqs_to_seqs(seqs):
+    return torch.LongTensor([[np.argmax(t.data) for t in s] for s in seqs])
+
+
+def sample(logits, temperature=1):
+    return F.softmax(logits / temperature, dim=1)
+
+
+def extend_inactive_with_pads(samples, active_seq_idx, batch_size):
+    assert samples.dim() == 2
+    assert samples.size(0) == len(active_seq_idx)
+
+    # We should distribute our samples according their indices (active_seq_idx)
+    # And other staff we should fill with constants.PAD (one-hotted)
+    pad_idx = Variable(torch.LongTensor([constants.PAD]))
+    outputs = Variable(torch.zeros(batch_size, samples.size(1)))
+
+    if use_cuda:
+        pad_idx.cuda()
+        outputs.cuda()
+
+    outputs.index_fill_(1, pad_idx, 1)
+    outputs[active_seq_idx] = samples
+
+    return outputs

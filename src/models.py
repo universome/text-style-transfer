@@ -1,8 +1,10 @@
+from itertools import chain
+
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
 
-from src.transformer.models import Transformer
+from src.transformer.models import Transformer, one_hot_seqs_to_seqs
 import src.transformer.constants as constants
 
 
@@ -56,16 +58,20 @@ class TransformerClassifier(nn.Module):
         # (we are passing constants.PAD there for padding_idx, and it's index is 3)
         self.transformer = Transformer(vocab_size, 4, max_len, **transformer_kwargs)
         self.num_classes = num_classes
-        self.dec_out_to_logits = nn.Linear(transformer_kwargs['d_model'], num_classes)
+        self.dec_out_to_logits = nn.Linear(transformer_kwargs['d_model'], num_classes-1)
+
+    def get_trainable_parameters(self):
+        return chain(self.transformer.get_trainable_parameters(), self.dec_out_to_logits.parameters())
 
     def forward(self, x, use_trg_embs_in_encoder=False, one_hot_input=False):
         pseudo_trg = Variable(torch.LongTensor([[0] for _ in range(x.size(0))]))
         if use_cuda: pseudo_trg.cuda()
 
         encoder_embs = self.decoder.tgt_word_emb if use_trg_embs_in_encoder else None
+        src_seq = one_hot_seqs_to_seqs(x) if one_hot_input else x
 
-        enc_output, *_ = self.transformer.encoder(x, embs=encoder_embs, one_hot_input=one_hot_input)
-        dec_output = self.transformer.decoder(pseudo_trg, x, enc_output, one_hot_input=one_hot_input).squeeze(1)
-        logits = self.dec_out_to_logits(dec_output)
+        enc_output, *_ = self.transformer.encoder(x, embs=encoder_embs, one_hot_src=one_hot_input)
+        dec_output = self.transformer.decoder(pseudo_trg, src_seq, enc_output).squeeze(1)
+        logits = self.dec_out_to_logits(dec_output).squeeze()
 
         return logits
