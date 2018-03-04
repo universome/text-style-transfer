@@ -12,6 +12,7 @@ from src.transformer.modules import BottleLinear as Linear
 from src.transformer.layers import EncoderLayer, DecoderLayer
 from src.transformer.beam import Beam
 from src.utils.common import variable
+from src.utils.gumbel import gumbel_softmax
 
 
 use_cuda = torch.cuda.is_available()
@@ -325,8 +326,9 @@ class Transformer(nn.Module):
 
             dec_output = self.decoder(active_translations, src_seq, enc_output, embs=embs, cache=cache, one_hot_trg=True)
             logits = proj(dec_output[:, -1, :]) # We need only the last word
-            samples = sample(logits, temperature)
-            samples = extend_inactive_with_pads(samples, active_seq_idxs, batch_size)
+            samples_one_hot = gumbel_softmax(logits, temperature)
+            # samples_ints = one_hot_to_ints(samples_one_hot)
+            samples = extend_inactive_with_pads(samples_one_hot, active_seq_idxs, batch_size)
             translations = torch.cat((translations, samples.unsqueeze(1)), 1)
 
             n_remaining_sents = active_seq_idxs.size(0)
@@ -485,10 +487,6 @@ def one_hot_seqs_to_seqs(seqs):
     if use_cuda: seqs = seqs.cuda()
 
     return seqs
-
-
-def sample(logits, temperature=1):
-    return F.softmax(logits / temperature, dim=1)
 
 
 def extend_inactive_with_pads(samples, active_seq_idx, batch_size):
