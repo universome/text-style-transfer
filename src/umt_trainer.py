@@ -30,7 +30,7 @@ SCORES_TITLES = {
 }
 
 
-class Trainer:
+class UMTTrainer:
     def __init__(self, transformer, discriminator, vocab_src, vocab_trg,
                  transformer_optimizer, discriminator_optimizer,
                  reconstruct_src_criterion, reconstruct_trg_criterion, adv_criterion, config):
@@ -275,7 +275,8 @@ class Trainer:
         # We should pick elements which are not PADs
         indices_src = Variable(src_noised.data.ne(constants.PAD).view(-1).nonzero().squeeze())
         indices_trg = Variable(trg_noised.data.ne(constants.PAD).view(-1).nonzero().squeeze())
-        
+
+        # TODO: do not hard-code vector dimensions
         inputs_src = encodings_src.view(-1, 512).index_select(0, indices_src)
         inputs_trg = encodings_trg.view(-1, 512).index_select(0, indices_trg)
 
