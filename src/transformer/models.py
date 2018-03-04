@@ -305,7 +305,7 @@ class Transformer(nn.Module):
             # (we determine EOS by argmax(sample) == EOS)
             active_seq_idxs = [i for i in range(n_remaining_sents) if not (np.argmax(translations[i][-1].data) in (constants.EOS, constants.PAD))]
             active_seq_idxs = torch.LongTensor(active_seq_idxs)
-            if use_cuda: active_seq_idxs.cuda()
+            if use_cuda: active_seq_idxs = active_seq_idxs.cuda()
 
             # Update the remaining size
             if len(active_seq_idxs) == 0: break
@@ -475,13 +475,16 @@ def init_translations(vocab_size, batch_size):
 
     # Convert it to pytorch Variable
     translations = Variable(torch.FloatTensor(translations))
-    if use_cuda: translations.cuda()
+    if use_cuda: translations = translations.cuda()
 
     return translations
 
 
 def one_hot_seqs_to_seqs(seqs):
-    return torch.LongTensor([[np.argmax(t.data) for t in s] for s in seqs])
+    seqs = torch.LongTensor([[np.argmax(t.data) for t in s] for s in seqs])
+    if use_cuda: seqs = seqs.cuda()
+
+    return seqs
 
 
 def sample(logits, temperature=1):
@@ -498,8 +501,8 @@ def extend_inactive_with_pads(samples, active_seq_idx, batch_size):
     outputs = Variable(torch.zeros(batch_size, samples.size(1)))
 
     if use_cuda:
-        pad_idx.cuda()
-        outputs.cuda()
+        pad_idx = pad_idx.cuda()
+        outputs = outputs.cuda()
 
     outputs.index_fill_(1, pad_idx, 1)
     outputs[active_seq_idx] = samples

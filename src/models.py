@@ -65,7 +65,7 @@ class TransformerClassifier(nn.Module):
 
     def forward(self, x, use_trg_embs_in_encoder=False, one_hot_input=False):
         pseudo_trg = Variable(torch.LongTensor([[0] for _ in range(x.size(0))]))
-        if use_cuda: pseudo_trg.cuda()
+        if use_cuda: pseudo_trg = pseudo_trg.cuda()
 
         encoder_embs = self.decoder.tgt_word_emb if use_trg_embs_in_encoder else None
         src_seq = one_hot_seqs_to_seqs(x) if one_hot_input else x
