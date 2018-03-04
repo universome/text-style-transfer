@@ -11,7 +11,7 @@ import src.transformer.constants as constants
 from src.transformer.modules import BottleLinear as Linear
 from src.transformer.layers import EncoderLayer, DecoderLayer
 from src.transformer.beam import Beam
-from src.utils.common import variable
+from src.utils.common import variable, one_hot_seqs_to_seqs, embed
 from src.utils.gumbel import gumbel_softmax
 
 
@@ -42,8 +42,7 @@ class Encoder(nn.Module):
 
     def forward(self, src_seq, embs=None, one_hot_src=False):
         # Word embedding look up
-        embs = embs or self.src_word_emb
-        enc_input = torch.matmul(src_seq, embs.weight) if one_hot_src else embs(src_seq)
+        enc_input = embed(src_seq, embs or self.src_word_emb, one_hot_input=one_hot_src)
 
         # Position Encoding addition
         positions = get_positions_for_seqs(src_seq, one_hot_input=one_hot_src)
@@ -89,10 +88,11 @@ class Decoder(nn.Module):
               We need this for fast inference.
         """
 
-        # Word embeddings look up
-        # TODO: cache this
-        embs = embs or self.tgt_word_emb
-        dec_input = torch.matmul(tgt_seq, embs.weight) if one_hot_trg else embs(tgt_seq)
+        # TODO: actually, we can determine one_hot_input by just looking at .dim()
+        # Should we guess input format this way?
+
+        # TODO: cache this too
+        dec_input = embed(tgt_seq, embs or self.tgt_word_emb, one_hot_input=one_hot_trg)
 
         # Position Encoding
         positions = get_positions_for_seqs(tgt_seq, one_hot_input=one_hot_trg)
@@ -327,7 +327,6 @@ class Transformer(nn.Module):
             dec_output = self.decoder(active_translations, src_seq, enc_output, embs=embs, cache=cache, one_hot_trg=True)
             logits = proj(dec_output[:, -1, :]) # We need only the last word
             samples_one_hot = gumbel_softmax(logits, temperature)
-            # samples_ints = one_hot_to_ints(samples_one_hot)
             samples = extend_inactive_with_pads(samples_one_hot, active_seq_idxs, batch_size)
             translations = torch.cat((translations, samples.unsqueeze(1)), 1)
 
@@ -480,13 +479,6 @@ def init_translations(vocab_size, batch_size):
     if use_cuda: translations = translations.cuda()
 
     return translations
-
-
-def one_hot_seqs_to_seqs(seqs):
-    seqs = torch.LongTensor([[np.argmax(t.data) for t in s] for s in seqs])
-    if use_cuda: seqs = seqs.cuda()
-
-    return seqs
 
 
 def extend_inactive_with_pads(samples, active_seq_idx, batch_size):
