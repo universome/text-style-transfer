@@ -65,6 +65,8 @@ class CycleTrainer:
         self.num_epochs_done = 0
         self.max_num_epochs = config.get('max_num_epochs', 100)
         self.max_len = config.get('max_len', 50)
+        self.temperature_update_scheme = config.get('temperature_update_scheme', (1,1,0))
+        self.generator_loss_coef = config.get('generator_loss_coef', 1)
 
         self.train_scores = {
             'discr_src_loss_on_true': [],
@@ -102,8 +104,8 @@ class CycleTrainer:
     def train_on_batch(self, batch):
         src, trg = batch
         # Normal forward pass
-        preds_src_to_trg = self.transformer_src_to_trg.differentiable_translate(src, self.vocab_trg, max_len=30)
-        preds_trg_to_src = self.transformer_trg_to_src.differentiable_translate(trg, self.vocab_src, max_len=30)
+        preds_src_to_trg = self.transformer_src_to_trg.differentiable_translate(src, self.vocab_trg, max_len=30, temperature=self.compute_temperature())
+        preds_trg_to_src = self.transformer_trg_to_src.differentiable_translate(trg, self.vocab_src, max_len=30, temperature=self.compute_temperature())
 
         # Running our discriminators to predict domains
         # Target discriminator
@@ -137,8 +139,8 @@ class CycleTrainer:
         discr_trg_loss = discr_trg_loss_on_true + discr_trg_loss_on_fake
 
         # Uff, ok. Let's compute losses for our generators
-        gen_src_to_trg_loss = self.adv_criterion(fake_domains_preds_trg, fake_domains_y_trg_for_gen)
-        gen_trg_to_src_loss = self.adv_criterion(fake_domains_preds_src, fake_domains_y_src_for_gen)
+        gen_src_to_trg_loss = self.adv_criterion(fake_domains_preds_trg, fake_domains_y_trg_for_gen) * self.generator_loss_coef
+        gen_trg_to_src_loss = self.adv_criterion(fake_domains_preds_src, fake_domains_y_src_for_gen) * self.generator_loss_coef
 
         # "Back-translation" passes
         preds_src_to_trg_to_src = self.transformer_trg_to_src(preds_src_to_trg, src, one_hot_src=True)
@@ -176,8 +178,8 @@ class CycleTrainer:
         self.train_scores['discr_src_loss_on_fake'].append(discr_src_loss_on_fake.data[0])
         self.train_scores['discr_trg_loss_on_true'].append(discr_trg_loss_on_true.data[0])
         self.train_scores['discr_trg_loss_on_fake'].append(discr_trg_loss_on_fake.data[0])
-        self.train_scores['gen_src_to_trg_loss'].append(gen_src_to_trg_loss.data[0])
-        self.train_scores['gen_trg_to_src_loss'].append(gen_trg_to_src_loss.data[0])
+        self.train_scores['gen_src_to_trg_loss'].append(gen_src_to_trg_loss.data[0] / self.generator_loss_coef)
+        self.train_scores['gen_trg_to_src_loss'].append(gen_trg_to_src_loss.data[0] / self.generator_loss_coef)
         self.train_scores['src_reconstruction_loss'].append(src_reconstruction_loss.data[0])
         self.train_scores['trg_reconstruction_loss'].append(trg_reconstruction_loss.data[0])
 
@@ -222,9 +224,9 @@ class CycleTrainer:
             plt.subplot(plot_position)
 
             plt.plot(self.train_scores[src], color='#33ACFF')
-            plt.plot(pd.DataFrame(self.train_scores[src]).ewm(span=50).mean(), label=SCORES_TITLES[src], color='#0000FF')
-
             plt.plot(self.train_scores[trg], color='#FF7B7B')
+            
+            plt.plot(pd.DataFrame(self.train_scores[src]).ewm(span=50).mean(), label=SCORES_TITLES[src], color='#0000FF')
             plt.plot(pd.DataFrame(self.train_scores[trg]).ewm(span=50).mean(), label=SCORES_TITLES[trg], color='#FF0000')
 
             plt.legend(loc='lower left')
@@ -240,3 +242,11 @@ class CycleTrainer:
         plt.grid()
         plt.legend()
         plt.show()
+        
+    def compute_temperature(self):
+        t1, t2, period = self.temperature_update_scheme
+
+        if self.num_iters_done > period:
+            return t2
+        else:
+            return t1 - (t1 - t2) * self.num_iters_done / period
