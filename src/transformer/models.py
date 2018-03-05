@@ -73,7 +73,6 @@ class Decoder(nn.Module):
 
         self.position_enc = nn.Embedding(n_position, d_word_vec, padding_idx=constants.PAD)
         self.position_enc.weight.data = position_encoding_init(n_position, d_word_vec)
-
         self.tgt_word_emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=constants.PAD)
 
         self.layer_stack = nn.ModuleList([

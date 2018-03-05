@@ -111,6 +111,7 @@ class SimpleTransformerClassifier(nn.Module):
         dec_output = variable(torch.ones(x.size(0), 1, self.d_model))
         dec_slf_attn_mask = get_attn_padding_mask(tgt_seq, tgt_seq)
         dec_slf_attn_mask = torch.zeros(x.size(0), 1, 1).byte()
+        if use_cuda: dec_slf_attn_mask = dec_slf_attn_mask.cuda()
         dec_enc_attn_pad_mask = get_attn_padding_mask(tgt_seq, src_seq)
 
         for dec_layer in self.decoder.layer_stack:

@@ -60,7 +60,7 @@ class UMTTrainer:
         self.max_num_epochs = config.get('max_num_epochs', 100)
         self.start_bt_from_iter = config.get('start_bt_from_iter', 500)
         self.max_seq_len = config.get('max_seq_len', 50)
-        self.gen_loss_coef = config.get('gen_loss_coef', 0.1)
+        self.gen_loss_coef = config.get('gen_loss_coef', 1)
 
         self.train_scores = {
             'dae_loss_src': [],
