@@ -42,7 +42,7 @@ class UMTBatcher(object):
         self._iter_count = 0
         self._should_shuffle = shuffle
         self._seq_noise_options = seq_noise_options
-        
+
         if self._should_shuffle:
             self.shuffle()
 
@@ -85,7 +85,7 @@ class UMTBatcher(object):
             trg_noised = pad_to_longest(trg_noised)
             src = pad_to_longest(src)
             trg = pad_to_longest(trg)
-            
+
             self._iter_count += 1
 
             return src_noised, trg_noised, src, trg
