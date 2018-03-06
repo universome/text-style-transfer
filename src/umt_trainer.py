@@ -24,8 +24,6 @@ SCORES_TITLES = {
     'discr_loss_trg': '[trg] lang discriminator loss',
     'gen_loss_src': '[src] lang generator loss',
     'gen_loss_trg': '[trg] lang generator loss',
-    'src_to_trg_bleu': '[src->trg] Translation BLEU',
-    'trg_to_src_bleu': '[trg->src] Translation BLEU',
     'src_to_trg_bleu': '[src->trg] BLEU score',
     'trg_to_src_bleu': '[trg->src] BLEU score',
 }
@@ -70,9 +68,7 @@ class UMTTrainer:
             'discr_loss_src': [],
             'discr_loss_trg': [],
             'gen_loss_src': [],
-            'gen_loss_trg': [],
-            'src_to_trg_bleu': [],
-            'trg_to_src_bleu': []
+            'gen_loss_trg': []
         }
 
         self.val_scores = {'src_to_trg_bleu': [], 'trg_to_src_bleu': []}
@@ -190,35 +186,22 @@ class UMTTrainer:
     def _run_bt(self, src, trg):
         self.transformer.eval()
         # Get translations for backtranslation
-        bt_trg = self.transformer.translate_batch(src, beam_size=2, max_len=self.max_seq_len-2)
-        bt_src = self.transformer.translate_batch(trg, beam_size=2, max_len=self.max_seq_len-2,
-                                                    use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
+        bt_src_to_trg = self.transformer.translate_batch(src, beam_size=2, max_len=self.max_seq_len-2)
+        bt_trg_to_src = self.transformer.translate_batch(trg, beam_size=2, max_len=self.max_seq_len-2,
+                                                         use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
 
         # We should prepend our sentences with BOS symbol
-        bt_trg = [[constants.BOS] + s for s in bt_trg]
-        bt_src = [[constants.BOS] + s for s in bt_src]
-
-        # It's a good opportunity for us to measure BLEU score
-        bt_trg_sents = token_ids_to_sents(bt_trg, self.vocab_trg)
-        bt_src_sents = token_ids_to_sents(bt_src, self.vocab_src)
-        src_sents = token_ids_to_sents(src, self.vocab_src)
-        trg_sents = token_ids_to_sents(trg, self.vocab_trg)
-
-        bt_trg = pad_to_longest(bt_trg)
-        bt_src = pad_to_longest(bt_src)
+        bt_src_to_trg = pad_to_longest([[constants.BOS] + s for s in bt_src_to_trg])
+        bt_trg_to_src = pad_to_longest([[constants.BOS] + s for s in bt_trg_to_src])
 
         # Computing predictions for back-translated sentences
         self.transformer.train()
-        bt_src_preds = self.transformer(trg, src, use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
-        bt_trg_preds = self.transformer(src, trg)
+        bt_src_to_trg_to_src_preds = self.transformer(bt_src_to_trg, src, use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
+        bt_trg_to_src_to_trg_preds = self.transformer(bt_trg_to_src, trg)
 
         # Computing losses
-        loss_bt_src = self.reconstruct_src_criterion(bt_src_preds, src[:, 1:].contiguous().view(-1))
-        loss_bt_trg = self.reconstruct_trg_criterion(bt_trg_preds, trg[:, 1:].contiguous().view(-1))
-
-        # Saving scores
-        self.train_scores['src_to_trg_bleu'].append(compute_bleu_for_sents(bt_trg_sents, trg_sents))
-        self.train_scores['trg_to_src_bleu'].append(compute_bleu_for_sents(bt_src_sents, src_sents))
+        loss_bt_src = self.reconstruct_src_criterion(bt_src_to_trg_to_src_preds, src[:, 1:].contiguous().view(-1))
+        loss_bt_trg = self.reconstruct_trg_criterion(bt_trg_to_src_to_trg_preds, trg[:, 1:].contiguous().view(-1))
 
         return loss_bt_src, loss_bt_trg
 
@@ -252,29 +235,11 @@ class UMTTrainer:
         plt.show()
 
         # We have two additional plots: train BLEU and validation CE
-        self.plot_bleu()
-
-    # TODO: just add display style parameter: single/paired
-    def plot_bleu(self):
-        if not self.val_scores['src_to_trg_bleu'] and not self.train_scores['src_to_trg_bleu']:
-            # We have nothing to display :(
-            return
-
-        plt.figure(figsize=[16,4])
-
-        if self.train_scores['src_to_trg_bleu']:
-            src, trg = 'src_to_trg_bleu', 'trg_to_src_bleu'
-            iters = np.arange(self.start_bt_from_iter, self.start_bt_from_iter + len(self.train_scores[src]))
-            plt.subplot(121)
-            plt.title('BLEU scores of training batches')
-            plt.plot(iters, pd.DataFrame(self.train_scores[src]).ewm(span=100).mean(), label=SCORES_TITLES[src])
-            plt.plot(iters, pd.DataFrame(self.train_scores[trg]).ewm(span=100).mean(), label=SCORES_TITLES[trg])
-            plt.grid()
-            plt.legend()
-
         if self.val_scores['src_to_trg_bleu']:
+            plt.figure(figsize=[16,4])
+            
             src, trg = 'src_to_trg_bleu', 'trg_to_src_bleu'
-            val_iters = np.arange(len(self.val_scores[src])) * self.num_iters_done
+            val_iters = np.arange(len(self.val_scores[src])) * (self.num_iters_done / len(self.val_scores[src]))
 
             plt.subplot(122)
             plt.title('Val translation BLEU')
@@ -283,4 +248,4 @@ class UMTTrainer:
             plt.grid()
             plt.legend()
 
-        plt.show()
+            plt.show()
