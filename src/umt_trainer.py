@@ -122,7 +122,7 @@ class UMTTrainer:
         # Training generator on fake domains
         gen_loss_src = self.adv_criterion(domains_preds_src, torch.ones_like(domains_preds_src))
         gen_loss_trg = self.adv_criterion(domains_preds_trg, torch.zeros_like(domains_preds_trg))
-        total_transformer_loss += (gen_loss_src + gen_loss_trg) * self.gen_loss_coef
+        total_transformer_loss += ((gen_loss_src + gen_loss_trg) * self.gen_loss_coef)
 
         # Backward passes
         self.transformer_optimizer.zero_grad()
@@ -141,7 +141,7 @@ class UMTTrainer:
         self.train_scores['gen_loss_src'].append(gen_loss_src.data[0])
         self.train_scores['gen_loss_trg'].append(gen_loss_trg.data[0])
 
-    def validate_bleu(self, val_data, return_translations=False):
+    def validate_bleu(self, val_data, return_results=False):
         all_translations_src_to_trg = []
         all_translations_trg_to_src = []
         all_targets_src_to_trg = []
@@ -160,17 +160,20 @@ class UMTTrainer:
 
         bleu_src_to_trg = compute_bleu_for_sents(all_translations_src_to_trg, all_targets_src_to_trg)
         bleu_trg_to_src = compute_bleu_for_sents(all_translations_trg_to_src, all_targets_trg_to_src)
-
-        self.val_scores['src_to_trg_bleu'].append(bleu_src_to_trg)
-        self.val_scores['trg_to_src_bleu'].append(bleu_trg_to_src)
-
-        if return_translations:
-            return {
-                'all_translations_src_to_trg': all_translations_src_to_trg,
-                'all_translations_trg_to_src': all_translations_trg_to_src,
-                'all_targets_src_to_trg': all_targets_src_to_trg,
-                'all_targets_trg_to_src': all_targets_trg_to_src
+        
+        if return_results:
+            scores = (bleu_src_to_trg, bleu_trg_to_src)
+            translations = {
+                'translations_src_to_trg': all_translations_src_to_trg,
+                'translations_trg_to_src': all_translations_trg_to_src,
+                'targets_src_to_trg': all_targets_src_to_trg,
+                'targets_trg_to_src': all_targets_trg_to_src
             }
+            
+            return scores, translations
+        else:
+            self.val_scores['src_to_trg_bleu'].append(bleu_src_to_trg)
+            self.val_scores['trg_to_src_bleu'].append(bleu_trg_to_src)
 
     def _run_dae(self, src_noised, trg_noised, src, trg):
         # Computing translation for ~src->src and ~trg->trg autoencoding tasks
