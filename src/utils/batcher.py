@@ -5,34 +5,37 @@ import transformer.constants as constants
 class Batcher(object):
     def __init__(
             self, src_seqs, tgt_seqs, src_word2idx, tgt_word2idx,
-            batch_size=64, shuffle=False):
+            batch_size=32, shuffle=False, parallel=True):
 
         assert batch_size > 0
         assert len(src_seqs) >= batch_size
-        assert len(src_seqs) == len(tgt_seqs)
-
-        self._n_batch = int(np.ceil(len(src_seqs) / batch_size))
-
-        self._batch_size = batch_size
-
+        assert (len(src_seqs) == len(tgt_seqs)) or not parallel
+        
         self._src_seqs = src_seqs
         self._tgt_seqs = tgt_seqs
 
+        self._n_batch = int(np.ceil(min(len(src_seqs), len(tgt_seqs)) / batch_size))
+        self._batch_size = batch_size
         self._iter_count = 0
+        self._should_shuffle = shuffle
+        self._parallel = parallel
 
-        self._need_shuffle = shuffle
-
-        if self._need_shuffle:
+        if self._should_shuffle:
             self.shuffle()
 
     def shuffle(self):
         ''' Shuffle data for a brand new start '''
-        if self._tgt_seqs:
+        if not self._tgt_seqs:
+            random.shuffle(self._src_seqs)
+            return
+        
+        if self._parallel:
             paired_insts = list(zip(self._src_seqs, self._tgt_seqs))
             random.shuffle(paired_insts)
             self._src_seqs, self._tgt_seqs = zip(*paired_insts)
         else:
             random.shuffle(self._src_seqs)
+            random.shuffle(self._trg_seqs)
 
     def __iter__(self):
         return self
@@ -62,7 +65,7 @@ class Batcher(object):
 
             return src_data, tgt_data
         else:
-            if self._need_shuffle:
+            if self._should_shuffle:
                 self.shuffle()
 
             self._iter_count = 0
