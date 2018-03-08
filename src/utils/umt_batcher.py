@@ -6,7 +6,7 @@ from torch.autograd import Variable
 
 from src.seq_noise import seq_noise_many
 from src.utils.data_utils import pad_to_longest
-import transformer.constants as constants
+import src.transformer.constants as constants
 
 use_cuda = torch.cuda.is_available()
 

@@ -237,18 +237,20 @@ class UMTTrainer:
 
         plt.show()
 
-        # We have two additional plots: train BLEU and validation CE
-        if self.val_scores['src_to_trg_bleu']:
-            plt.figure(figsize=[16,4])
+        self.plot_validation_scores()
+        
+    def plot_validation_scores(self):
+        if not self.val_scores['src_to_trg_bleu']: return
             
-            src, trg = 'src_to_trg_bleu', 'trg_to_src_bleu'
-            val_iters = np.arange(len(self.val_scores[src])) * (self.num_iters_done / len(self.val_scores[src]))
+        plt.figure(figsize=[16,4])
 
-            plt.subplot(122)
-            plt.title('Val translation BLEU')
-            plt.plot(val_iters, self.val_scores[src], label=SCORES_TITLES[src])
-            plt.plot(val_iters, self.val_scores[trg], label=SCORES_TITLES[trg])
-            plt.grid()
-            plt.legend()
+        src, trg = 'src_to_trg_bleu', 'trg_to_src_bleu'
+        val_iters = np.arange(len(self.val_scores[src])) * (self.num_iters_done / len(self.val_scores[src]))
 
-            plt.show()
+        plt.title('Val translation BLEU')
+        plt.plot(val_iters, self.val_scores[src], label=SCORES_TITLES[src])
+        plt.plot(val_iters, self.val_scores[trg], label=SCORES_TITLES[trg])
+        plt.grid()
+        plt.legend()
+
+        plt.show()

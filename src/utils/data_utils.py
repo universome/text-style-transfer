@@ -4,9 +4,8 @@ import torch
 from torch.autograd import Variable
 from tqdm import tqdm
 
-import transformer.constants as constants
-
-use_cuda = torch.cuda.is_available()
+import src.transformer.constants as constants
+from src.utils.common import variable
 
 
 def load_embeddings(embeddings_path):
@@ -45,13 +44,11 @@ def remove_spec_symbols(ids_seqs):
     return [[t for t in s if not t in spec_symbols] for s in ids_seqs]
 
 
-def pad_to_longest(seqs):
+def pad_to_longest(seqs, volatile=False):
     ''' Pads the instance to the max seq length in batch '''
     max_len = max(len(seq) for seq in seqs)
 
     padded_seqs = np.array([seq + [constants.PAD] * (max_len - len(seq)) for seq in seqs])
-    padded_seqs = Variable(torch.LongTensor(padded_seqs))
-
-    if use_cuda: padded_seqs = padded_seqs.cuda()
+    padded_seqs = variable(torch.LongTensor(padded_seqs), volatile=volatile)
 
     return padded_seqs
