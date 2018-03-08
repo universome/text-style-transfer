@@ -58,15 +58,15 @@ class StyleTransferTrainer(UMTTrainer):
                 
                 f.write('##### SRC->TRG translations #####\n')
                 for i, src_to_trg in enumerate(translations_src_to_trg):
-                    f.write('Source: ' + sources[i] + '\n')
-                    f.write('Result: ' + src_to_trg + '\n')
+                    f.write('Source    : ' + sources[i] + '\n')
+                    f.write('Translated: ' + src_to_trg + '\n')
                 
                 f.write('\n')
                 f.write('##### TRG->SRC translations #####\n')
                     
                 for i, trg_to_src in enumerate(translations_trg_to_src):
-                    f.write('Source: ' + targets[i] + '\n')
-                    f.write('Result: ' + trg_to_src + '\n')
+                    f.write('Target:          ' + targets[i] + '\n')
+                    f.write('Translated target: ' + trg_to_src + '\n')
                 
                 f.write('\n===============================================================================\n')
         
