@@ -228,7 +228,7 @@ class Transformer(nn.Module):
 
         n_remaining_sents = batch_size
 
-        for i in range(max_len):
+        for i in range(max_len-1):
             len_dec_seq = i + 1
 
             # -- Preparing decoded data seq -- #
@@ -290,7 +290,8 @@ class Transformer(nn.Module):
                                  use_src_embs_in_decoder=False, use_trg_embs_in_encoder=False):
         # TODO: can we use beam search here?
         batch_size = src_seq.size(0)
-        enc_output, *_ = self.encoder(src_seq)
+        embs = self.decoder.tgt_word_emb if use_trg_embs_in_encoder else None
+        enc_output, *_ = self.encoder(src_seq, embs=embs)
 
         # Here we are going to keep state of each decoder layer
         # So we are not recompute everything from scratch

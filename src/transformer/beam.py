@@ -15,6 +15,8 @@ class Beam(object):
     ''' Store the neccesary info for beam search. '''
 
     def __init__(self, size, cuda=False):
+        
+        assert size > 0
 
         self.size = size
         self.done = False
