@@ -5,7 +5,7 @@ Taken from https://gist.github.com/yzh119/fd2146d2aeb329d067568a493b20172f
 
 import torch
 import torch.nn.functional as F
-from torch.autograd import Variable
+from src.utils.common imoprt variable
 
 
 use_cuda = torch.cuda.is_available()
@@ -13,9 +13,7 @@ use_cuda = torch.cuda.is_available()
 
 def sample_gumbel(shape, eps=1e-20):
     U = torch.rand(shape)
-    G = Variable(-torch.log(-torch.log(U + eps) + eps), requires_grad=False)
-
-    if use_cuda: G = G.cuda()
+    G = variable(-torch.log(-torch.log(U + eps) + eps), requires_grad=False)
 
     return G
 
