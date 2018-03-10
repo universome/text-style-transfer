@@ -1,7 +1,10 @@
+import os
 import sys
 import json
 import pickle
 import time
+import zipfile
+from urllib.request import urlretrieve
 
 from pyquery import PyQuery as pq
 import requests
@@ -12,6 +15,21 @@ API_URL = 'http://api.knigafund.ru/api'
 API_KEY = 'api-example'
 AUTHORS_SEARCH_URL = '{}/authors/search.json'.format(API_URL)
 AUTHOR_BOOKS_URL = '{}/authors/{{}}/books.json'.format(API_URL)
+BOOK_SEARCH_QUERY = 'https://aldebaran.ru/pages/biblio_search/?q={}'
+BOOKS_HOST_URL = 'https://aldebaran.ru'
+HEADERS = {
+    'Host': 'aldebaran.ru',
+    'Connection': 'keep-alive',
+    'Pragma': 'no-cache',
+    'Cache-Control': 'no-cache',
+    'Upgrade-Insecure-Requests': '1',
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.186 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+    'Referer': 'https://aldebaran.ru/author/lermontov_mihail/kniga_stihotvoreniya/',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Accept-Language': 'en-US,en;q=0.9,ru;q=0.8',
+    'Cookie': 'SID=5z4qae5cald42g8abv7t057x5i744h7j; _ga=GA1.2.2007309197.1520611413; _gid=GA1.2.1033990952.1520611413; _ym_uid=1520611414149069110; _ym_isad=2; __utmc=267605726; __utmz=267605726.1520611429.1.1.utmcsr=(direct)|utmccn=(direct)|utmcmd=(none); __utma=267605726.2007309197.1520611413.1520611429.1520622235.2; _gat=1; _ym_visorc_27736506=w'
+}
 
 
 def main(cmd):
@@ -21,6 +39,19 @@ def main(cmd):
         load_books_lists()
     elif cmd == 'load_books_page_urls':
         load_books_page_urls()
+    elif cmd == 'download_books':
+        download_books()
+    elif cmd == 'unzip_books':
+        unzip_books()
+    elif cmd == 'convert_books_to_txt':
+        convert_books_to_txt()
+    elif cmd == 'all':
+        load_authors_ids()
+        load_books_lists()
+        load_books_page_urls()
+        download_books()
+        unzip_books()
+        convert_books_to_txt()
     else:
         raise NotImplemented
 
@@ -86,6 +117,116 @@ def load_books_lists():
         # Let's save results after each author just in case we are banned
         with open('load-books/author-to-books.json', 'w', encoding='utf-8') as f:
             json.dump(author_to_books, f)
+
+
+def load_books_page_urls():
+    author_to_books = json.load(open('load-books/author-to-books.json', encoding='utf-8'))
+    titles = [a + ' ' + b for a in author_to_books for b in author_to_books[a]]
+    with open('load-books/books-page-urls.json', 'r', encoding='utf-8') as f: books_urls = json.load(f)
+    print('Num books to download', len(titles))
+    print('Already have books', len(books_urls))
+
+    for title in tqdm(titles):
+        time.sleep(5) # Do not DDOS
+        url = BOOK_SEARCH_QUERY.format(title)
+        doc = pq(url=url, headers=HEADERS)
+
+        if 'робот' in doc.text(): print('We are banned :(')
+        if len(doc('.item_info.border_bottom')) < 2: continue
+        if len(doc('.item_info.border_bottom:nth-child(2) a')) != 2: continue
+
+        href = doc('.item_info.border_bottom:nth-child(2) a')[0].attrib['href']
+        if not ((BOOKS_HOST_URL + href) in books_urls):
+            books_urls.append(BOOKS_HOST_URL + href)
+        else:
+            print('Already have', BOOKS_HOST_URL + href)
+
+        # Let's save after each book in case of we are banned
+        with open('load-books/books-page-urls.json', 'w', encoding='utf-8') as f:
+            json.dump(books_urls, f)
+
+
+# def load_books_file_urls():
+#     books_urls = json.load(open('load-books/books-page-urls.json', encoding='utf-8'))
+#     print('Num books to retrieve:', len(books_urls))
+
+#     for url in tqdm(books_urls):
+#         time.sleep(5)
+#         doc = pq(url=url, headers=HEADERS)
+
+#         if len(doc('.wrapper .block_mixed .bm1 .item_info.border_bottom')) != 1: continue
+#         if len(doc('.wrapper .block_mixed .bm1 .item_info.border_bottom a:nth-child(2)')) != 1: continue
+
+#         el = doc('.wrapper .block_mixed .bm1 .item_info.border_bottom a:nth-child(2)')
+#         if el.text() != 'html.zip':
+#             print('Found unusual format:', el.text(), 'for url:', url)
+#             continue
+
+#         books_file_urs.append(BOOKS_HOST_URL + el.attrib['href'])
+
+#         with open('load-books/books-file-urls.json', 'w', encoding='utf-8') as f:
+#             json.dump(books_file_urs, f)
+
+
+def download_books():
+    books_urls = json.load(open('load-books/books-page-urls.json', encoding='utf-8'))
+    print('Num books to download:', len(books_urls))
+    if not os.path.exists('load-books/archives'): os.mkdir('load-books/archives')
+
+    for page_url in tqdm(books_urls):
+        time.sleep(15)
+        download_url = page_url + 'download.html.zip'
+        print('Downloading', download_url)
+
+        try:
+            file_name = 'load-books/archives/{}_{}.zip'.format(*page_url.split('/')[-3:-1])
+            urlretrieve(download_url, file_name)
+
+            # Lets check if download is successfull
+            print('Trying to unpack')
+            unzip_books()
+        except Exception as e:
+            print('Could not download book:', download_url)
+            print(e)
+
+
+def unzip_books():
+    if not os.path.exists('load-books/html'): os.mkdir('load-books/html')
+    book_names = [b[:-4] for b in os.listdir('load-books/archives') if b[-4:] == '.zip']
+
+    for book_name in book_names:
+        try:
+            archive_path = 'load-books/archives/' + book_name + '.zip'
+            zip_ref = zipfile.ZipFile(archive_path, 'r')
+            zip_ref.extractall('load-books/html')
+            zip_ref.close()
+        except Exception as e:
+            print('Could not extract book:', archive_path)
+            print(e)
+
+    # Let's clean directory from images
+    for file in os.listdir('load-books/html'):
+        if file[-5:] != '.html':
+            os.remove('load-books/html/' + file)
+
+
+def convert_books_to_txt():
+    if not os.path.exists('load-books/txt'): os.mkdir('load-books/txt')
+    book_names = [b[:-5] for b in os.listdir('load-books/html') if b[-5:] == '.html']
+
+    for book_name in book_names:
+        in_book_path = 'load-books/html/' + book_name + '.html'
+        out_book_path = 'load-books/txt/' + book_name + '.txt'
+
+        with open(in_book_path, 'rb') as fin, open(out_book_path, 'w', encoding='utf-8') as fout:
+            try:
+                doc = pq(fin.read())
+                doc('style').remove()
+                doc('title').remove()
+                fout.write(doc.text())
+            except Exception as e:
+                print('Could not parse book:', in_book_path)
+                print(e)
 
 
 if __name__ == '__main__':
