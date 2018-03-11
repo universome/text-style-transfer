@@ -125,8 +125,13 @@ class Vocab:
     def from_sequences(cls, sentences, separator=' '):
         """ Infers tokens from a corpora of sentences (tokens separated by separator) """
         tokens = set()
+        
         for s in sentences:
-            tokens.update(s.split(separator))
+            if separator == '':
+                tokens.update(s)
+            else:
+                tokens.update(s.split(separator))
+        
         return Vocab(list(cls._default_tokens) + sorted(tokens))
 
     @classmethod
