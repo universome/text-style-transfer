@@ -5,7 +5,7 @@ Taken from https://gist.github.com/yzh119/fd2146d2aeb329d067568a493b20172f
 
 import torch
 import torch.nn.functional as F
-from src.utils.common imoprt variable
+from src.utils.common import variable
 
 
 use_cuda = torch.cuda.is_available()
