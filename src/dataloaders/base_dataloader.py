@@ -1,7 +1,4 @@
 class BaseDataloader(object):
-    def __init__():
-        pass
-
     def shuffle(self):
         pass
 
@@ -16,7 +13,7 @@ class BaseDataloader(object):
 
     def next(self):
         if self._iter_count < self._n_batch:
-            self.step()
+            return self.step()
         else:
             self.reset()
 

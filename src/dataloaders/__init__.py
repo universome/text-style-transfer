@@ -1,9 +1,9 @@
 from .batcher import Batcher
 from .umt_batcher import UMTBatcher
-from .char_batcher import CharBatcher
+from .one_sided_dataloader import OneSidedDataloader
 
 __all__ = [
     Batcher,
-    CharBatcher,
+    OneSidedDataloader,
     UMTBatcher
 ]

@@ -52,7 +52,7 @@ class Vocab:
             sentence = sentence.split(separator)
 
         sentence = list(sentence)
-        if constants.EOS_WORD not in sentence:
+        if sentence[-1] != constants.EOS_WORD:
             sentence.append(constants.EOS_WORD)
         if sentence[0] != constants.BOS_WORD:
             sentence.insert(0, constants.BOS_WORD)
