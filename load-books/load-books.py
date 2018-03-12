@@ -19,16 +19,9 @@ BOOK_SEARCH_QUERY = 'https://aldebaran.ru/pages/biblio_search/?q={}'
 BOOKS_HOST_URL = 'https://aldebaran.ru'
 HEADERS = {
     'Host': 'aldebaran.ru',
-    'Connection': 'keep-alive',
-    'Pragma': 'no-cache',
-    'Cache-Control': 'no-cache',
-    'Upgrade-Insecure-Requests': '1',
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.186 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-    'Referer': 'https://aldebaran.ru/author/lermontov_mihail/kniga_stihotvoreniya/',
     'Accept-Encoding': 'gzip, deflate, br',
     'Accept-Language': 'en-US,en;q=0.9,ru;q=0.8',
-    'Cookie': 'SID=5z4qae5cald42g8abv7t057x5i744h7j; _ga=GA1.2.2007309197.1520611413; _gid=GA1.2.1033990952.1520611413; _ym_uid=1520611414149069110; _ym_isad=2; __utmc=267605726; __utmz=267605726.1520611429.1.1.utmcsr=(direct)|utmccn=(direct)|utmcmd=(none); __utma=267605726.2007309197.1520611413.1520611429.1520622235.2; _gat=1; _ym_visorc_27736506=w'
 }
 
 
@@ -170,6 +163,7 @@ def load_books_page_urls():
 
 def download_books():
     books_urls = json.load(open('load-books/books-page-urls.json', encoding='utf-8'))
+    books_urls = [l for l in books_urls if not ('litres' in l or 'tags' in l)]
     print('Num books to download:', len(books_urls))
     if not os.path.exists('load-books/archives'): os.mkdir('load-books/archives')
 
@@ -180,11 +174,7 @@ def download_books():
 
         try:
             file_name = 'load-books/archives/{}_{}.zip'.format(*page_url.split('/')[-3:-1])
-            urlretrieve(download_url, file_name)
-
-            # Lets check if download is successfull
-            print('Trying to unpack')
-            unzip_books()
+            urlretrieve(download_url, filename=file_name)
         except Exception as e:
             print('Could not download book:', download_url)
             print(e)
@@ -192,11 +182,11 @@ def download_books():
 
 def unzip_books():
     if not os.path.exists('load-books/html'): os.mkdir('load-books/html')
-    book_names = [b[:-4] for b in os.listdir('load-books/archives') if b[-4:] == '.zip']
+    archives = [a for a in os.listdir('load-books/archives') if b[-4:] == '.zip']
 
-    for book_name in book_names:
+    for archive in archives:
         try:
-            archive_path = 'load-books/archives/' + book_name + '.zip'
+            archive_path = 'load-books/archives/' + archive
             zip_ref = zipfile.ZipFile(archive_path, 'r')
             zip_ref.extractall('load-books/html')
             zip_ref.close()
