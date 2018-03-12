@@ -1,12 +1,12 @@
 from src.utils.data_utils import * # TODO: be specific
-import transformer.constants as constants
+from src.vocab import constants
 
 
 class CharBatcher(object):
     def __init__(self, seqs, batch_size=16, shuffle=False):
         assert batch_size > 0
         assert len(seqs) >= batch_size
-        
+
         self._seqs = seqs
         self._n_batch = int(np.ceil(len(seqs)) / batch_size)
         self._batch_size = batch_size

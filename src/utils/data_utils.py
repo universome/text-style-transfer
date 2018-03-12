@@ -4,7 +4,7 @@ import torch
 from torch.autograd import Variable
 from tqdm import tqdm
 
-import src.transformer.constants as constants
+from src.vocab import constants
 from src.utils.common import variable
 
 

@@ -7,7 +7,7 @@ from tqdm import tqdm; tqdm.monitor_interval = 0
 
 from src.utils.common import variable
 from src.utils.data_utils import pad_to_longest, token_ids_to_sents
-import src.transformer.constants as constants
+from src.vocab import constants
 from src.utils.bleu import compute_bleu_for_sents
 
 
@@ -48,7 +48,7 @@ SCORES_TITLES = {
     'bleu_trg_to_src_to_trg': '[trg->src->trg] BLEU score'
 }
 
-class Trainer:
+class MasterTrainer:
     """
     This is a general trainer for NMT/style-transfer,
     which can handle a lot of experiment setups
@@ -179,7 +179,7 @@ class Trainer:
         fake_domains_preds_trg = self.discriminator_trg(preds_src_to_trg, one_hot_input=True)
         true_domains_preds_src = self.discriminator_src(src)
         fake_domains_preds_src = self.discriminator_src(preds_trg_to_src, one_hot_input=True)
-        
+
         # TODO: does it really help? we still need a backward pass for these vars
         del preds_src_to_trg
         del preds_trg_to_src
@@ -211,7 +211,7 @@ class Trainer:
         self.translator_optimizer.zero_grad()
         translator_loss.backward(retain_graph=True)
         self.translator_optimizer.step()
-        
+
         # Discriminators updates
         self.discriminator_src_optimizer.zero_grad()
         self.discriminator_trg_optimizer.zero_grad()
@@ -385,21 +385,21 @@ class Trainer:
             self.discriminator_trg.eval()
         else:
             raise NotImplemented
-            
+
     def temperature(self):
         return compute_param_by_scheme(self.temperature_update_scheme, self.num_iters_done)
-        
+
     def generator_loss_coef(self):
         return compute_param_by_scheme(self.generator_loss_coef_update_scheme, self.num_iters_done)
-        
-        
+
+
 def compute_param_by_scheme(scheme, num_iters_done):
     """
     Arguments:
     - scheme: format (start_val, end_val, period)
     """
     t1, t2, period = scheme
-    
+
     if num_iters_done > period:
         return t2
     else:

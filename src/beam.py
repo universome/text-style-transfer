@@ -9,19 +9,23 @@ from time import time
 
 import torch
 import numpy as np
-import transformer.constants as constants
+from src.vocab import constants
+
+
+use_cuda = torch.cuda.is_available()
+
 
 class Beam(object):
     ''' Store the neccesary info for beam search. '''
 
-    def __init__(self, size, cuda=False):
-        
+    def __init__(self, size):
+
         assert size > 0
 
         self.size = size
         self.done = False
 
-        self.tt = torch.cuda if cuda else torch
+        self.tt = torch.cuda if use_cuda else torch
 
         # The score for each translation on the beam.
         self.scores = self.tt.FloatTensor(size).zero_()

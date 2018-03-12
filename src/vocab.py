@@ -1,5 +1,21 @@
+from collections import namedtuple
+
 import numpy as np
 
+
+Constants = namedtuple('Constants', [
+    'BOS', 'BOS_WORD',
+    'EOS', 'EOS_WORD',
+    'UNK', 'UNK_WORD',
+    'PAD', 'PAD_WORD'
+])
+
+constants = Constants(
+    0, '__BOS__',
+    1, '__EOS__',
+    2, '__UNK__',
+    3, '__PAD__'
+)
 
 class Vocab:
     """
@@ -8,7 +24,8 @@ class Vocab:
     It should be saved with pickle.dump
     Here's a tour to what it does: http://bit.ly/2BDupuH
     """
-    _default_tokens = ("__BOS__", "__EOS__", "__UNK__", "__PAD__")
+    _default_tokens = (constants.BOS_WORD, constants.EOS_WORD,
+                       constants.UNK_WORD, constants.PAD_WORD)
 
     def __init__(self, tokens):
         tokens = tuple(tokens)
@@ -18,10 +35,10 @@ class Vocab:
 
         self.tokens = tokens
         self.token2id = {token: i for i, token in enumerate(self.tokens)}
-        self.bos = 0
-        self.eos = 1
-        self.unk = 2
-        self.pad = 3
+        self.bos = constants.BOS
+        self.eos = constants.EOS
+        self.unk = constants.UNK
+        self.pad = constants.PAD
 
     def __len__(self):
         return len(self.tokens)
@@ -35,10 +52,10 @@ class Vocab:
             sentence = sentence.split(separator)
 
         sentence = list(sentence)
-        if "__EOS__" not in sentence:
-            sentence.append("__EOS__")
-        if sentence[0] != "__BOS__":
-            sentence.insert(0, "__BOS__")
+        if constants.EOS_WORD not in sentence:
+            sentence.append(constants.EOS_WORD)
+        if sentence[0] != constants.BOS_WORD:
+            sentence.insert(0, constants.BOS_WORD)
 
         return [self.token2id.get(token, self.unk) for token in sentence]
 
@@ -125,13 +142,13 @@ class Vocab:
     def from_sequences(cls, sentences, separator=' '):
         """ Infers tokens from a corpora of sentences (tokens separated by separator) """
         tokens = set()
-        
+
         for s in sentences:
             if separator == '':
                 tokens.update(s)
             else:
                 tokens.update(s.split(separator))
-        
+
         return Vocab(list(cls._default_tokens) + sorted(tokens))
 
     @classmethod

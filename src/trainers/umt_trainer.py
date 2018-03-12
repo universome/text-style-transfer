@@ -10,7 +10,7 @@ import pandas as pd
 
 from src.utils.data_utils import pad_to_longest, token_ids_to_sents
 from src.utils.bleu import compute_bleu_for_sents
-import src.transformer.constants as constants
+from src.vocab import constants
 from src.utils.common import variable
 
 use_cuda = torch.cuda.is_available()
@@ -160,7 +160,7 @@ class UMTTrainer:
 
         bleu_src_to_trg = compute_bleu_for_sents(all_translations_src_to_trg, all_targets_src_to_trg)
         bleu_trg_to_src = compute_bleu_for_sents(all_translations_trg_to_src, all_targets_trg_to_src)
-        
+
         if return_results:
             scores = (bleu_src_to_trg, bleu_trg_to_src)
             translations = {
@@ -169,7 +169,7 @@ class UMTTrainer:
                 'targets_src_to_trg': all_targets_src_to_trg,
                 'targets_trg_to_src': all_targets_trg_to_src
             }
-            
+
             return scores, translations
         else:
             self.val_scores['src_to_trg_bleu'].append(bleu_src_to_trg)
@@ -238,10 +238,10 @@ class UMTTrainer:
         plt.show()
 
         self.plot_validation_scores()
-        
+
     def plot_validation_scores(self):
         if not self.val_scores['src_to_trg_bleu']: return
-            
+
         plt.figure(figsize=[16,4])
 
         src, trg = 'src_to_trg_bleu', 'trg_to_src_bleu'

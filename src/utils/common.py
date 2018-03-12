@@ -1,7 +1,7 @@
 import torch
 from torch.autograd import Variable
 
-import src.transformer.constants as constants
+from src.vocab import constants
 
 use_cuda = torch.cuda.is_available()
 

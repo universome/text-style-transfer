@@ -1,5 +1,5 @@
 from src.utils.data_utils import * # TODO: be specific
-import transformer.constants as constants
+from src.vocab import constants
 
 
 class Batcher(object):
@@ -10,7 +10,7 @@ class Batcher(object):
         assert batch_size > 0
         assert len(src_seqs) >= batch_size
         assert (len(src_seqs) == len(tgt_seqs)) or not parallel
-        
+
         self._src_seqs = src_seqs
         self._tgt_seqs = tgt_seqs
 
@@ -28,7 +28,7 @@ class Batcher(object):
         if not self._tgt_seqs:
             random.shuffle(self._src_seqs)
             return
-        
+
         if self._parallel:
             paired_insts = list(zip(self._src_seqs, self._tgt_seqs))
             random.shuffle(paired_insts)
