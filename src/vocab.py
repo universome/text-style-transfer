@@ -28,7 +28,7 @@ class Vocab:
                        constants.UNK_WORD, constants.PAD_WORD)
 
     def __init__(self, tokens):
-        tokens = tuple(tokens)
+        tokens = list(tokens)
         assert len(tokens) == len(set(tokens)), "tokens must be unique"
         for i, t in enumerate(self._default_tokens):
             assert t in tokens and tokens.index(t) == i, "token must have %s at index %i" % (t, i)
@@ -65,7 +65,7 @@ class Vocab:
         if self.eos in indices:
             indices = indices[:indices.index(self.eos) + 1]
 
-        tokens = [self.tokens[token] for token in indices]
+        tokens = [self.tokens[idx] for idx in indices]
         if deprocess:
             tokens = [t for t in tokens if t not in self._default_tokens]
 
