@@ -9,6 +9,7 @@ from src.utils.common import variable
 from src.utils.data_utils import pad_to_longest, token_ids_to_sents
 from src.vocab import constants
 from src.utils.bleu import compute_bleu_for_sents
+from .helpers import compute_param_by_scheme
 
 
 # TODO(universome): passing tasks as a list looks like
@@ -391,16 +392,3 @@ class MasterTrainer:
 
     def generator_loss_coef(self):
         return compute_param_by_scheme(self.generator_loss_coef_update_scheme, self.num_iters_done)
-
-
-def compute_param_by_scheme(scheme, num_iters_done):
-    """
-    Arguments:
-    - scheme: format (start_val, end_val, period)
-    """
-    t1, t2, period = scheme
-
-    if num_iters_done > period:
-        return t2
-    else:
-        return t1 - (t1 - t2) * num_iters_done / period

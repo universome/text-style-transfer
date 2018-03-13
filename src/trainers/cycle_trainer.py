@@ -10,6 +10,7 @@ import pandas as pd
 
 from src.utils.data_utils import token_ids_to_sents
 from src.utils.bleu import compute_bleu_for_sents
+from .helpers import compute_param_by_scheme
 
 
 use_cuda = torch.cuda.is_available()
@@ -204,7 +205,7 @@ class CycleTrainer:
         self.val_scores['src_to_trg_bleu'].append(src_to_trg_bleu)
         self.val_scores['trg_to_src_bleu'].append(trg_to_src_bleu)
         self.val_iters.append(self.num_iters_done)
-        
+
         if return_translations:
             return {
                 'all_translations_src_to_trg': all_translations_src_to_trg,
@@ -233,7 +234,7 @@ class CycleTrainer:
 
             plt.plot(self.train_scores[src], color='#33ACFF')
             plt.plot(self.train_scores[trg], color='#FF7B7B')
-            
+
             plt.plot(pd.DataFrame(self.train_scores[src]).ewm(span=50).mean(), label=SCORES_TITLES[src], color='#0000FF')
             plt.plot(pd.DataFrame(self.train_scores[trg]).ewm(span=50).mean(), label=SCORES_TITLES[trg], color='#FF0000')
 
@@ -250,23 +251,9 @@ class CycleTrainer:
         plt.grid()
         plt.legend()
         plt.show()
-        
+
     def temperature(self):
         return compute_param_by_scheme(self.temperature_update_scheme, self.num_iters_done)
-        
+
     def generator_loss_coef(self):
         return compute_param_by_scheme(self.generator_loss_coef_update_scheme, self.num_iters_done)
-        
-        
-def compute_param_by_scheme(scheme, num_iters_done):
-    """
-    Arguments:
-    - scheme: format (start_val, end_val, period)
-    """
-    t1, t2, period = scheme
-    
-    if num_iters_done >= period:
-        return t2
-    else:
-        return t1 - (t1 - t2) * num_iters_done / period
-    
