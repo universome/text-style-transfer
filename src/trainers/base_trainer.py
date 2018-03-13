@@ -8,6 +8,9 @@ class BaseTrainer:
         self.max_num_epochs = config.get('max_num_epochs', 10)
         self.validate_every = config.get('validate_every')
         self.plot_every = config.get('plot_every')
+        self.log_file = config.get('log_file')
+        self.should_validate = not self.validate_every is None
+        self.should_plot = not self.plot_every is None
 
     def run_training(self, training_data, val_data=None, plot_every=50, val_bleu_every=100):
         should_continue = True
@@ -27,10 +30,10 @@ class BaseTrainer:
     def train_step(self, batch, val_data):
         self.train_on_batch(batch)
 
-        if self.validate_every and self.num_iters_done % self.validate_every == 0:
+        if self.should_validate and self.num_iters_done % self.validate_every == 0:
             self.validate(val_data)
 
-        if self.plot_every and self.num_iters_done % self.plot_every == 0:
+        if self.should_plot and self.num_iters_done % self.plot_every == 0:
             self.plot_scores()
 
         self.num_iters_done += 1

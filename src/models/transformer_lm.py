@@ -38,9 +38,11 @@ class TransformerLM(Encoder):
 
         return (p for p in self.parameters() if id(p) not in freezed)
 
-    def inference(self, seqs: Variable, beam_size: int = 1) -> list:
+    def predict_next_words(self, seqs: Variable, beam_size: int = 1) -> list:
         """
-            Generates predictions for each word in the sequence (except the first one)
+            Generates next word predictions for each token
+            in the sequence in a batch.
+
             :param seqs: batch of sequences to predict.
             :param beam_size: beam size to use.
             :return: batch of sequences
