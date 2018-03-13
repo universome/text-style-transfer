@@ -62,22 +62,23 @@ class WordRecoveryTrainer(BaseTrainer):
         plt.figure(figsize=[16,8])
 
         # Plot training score
-        plt.subplot(121)
+        plt.subplot(211)
         plt.title('Batch loss history')
         plt.plot(self.loss_history)
         plt.plot(pd.DataFrame(self.loss_history).ewm(span=300).mean())
+        plt.grid()
 
         # Plot validation score
         num_vals = len(self.val_scores['main_seqs_accuracy'])
         if num_vals > 0:
             val_iters = np.arange(num_vals) * (self.num_iters_done / num_vals)
-            plt.subplot(122)
+            plt.subplot(212)
             plt.title('Validation accuracy')
             plt.plot(val_iters, self.val_scores['main_seqs_accuracy'], label='Accuracy on main corpus')
             plt.plot(val_iters, self.val_scores['seqs_to_mix_accuracy'], label='Accuracy on mixing corpus')
             plt.legend()
+            plt.grid()
 
-        plt.grid()
         plt.show()
 
     def validate(self, val_data, return_results=False):

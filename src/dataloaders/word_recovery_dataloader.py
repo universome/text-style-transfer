@@ -77,8 +77,9 @@ def drop_random_word(seq):
     i = random.choice(range(len(words)))
 
     sentence = ' '.join(words[:i] + [DROP_WORD] + words[i+1:])
+    dropped_word = words[i]
 
-    return sentence, words[i]
+    return sentence, dropped_word
 
 
 def drop_random_word_many(seqs):
@@ -131,3 +132,27 @@ def sample_seqs(main_seqs:list, seqs_to_mix:list, mixing_coef:float):
     seqs_to_mix = random.sample(seqs_to_mix, num_seqs_to_mix)
 
     return main_seqs, seqs_to_mix
+
+
+def drop_each_word_many(sentences:list):
+    """
+    We sequentilly replace each word from the sentence with __DROP__.
+    In such a way we get `n` sentences from a sentence with `n` words.
+    """
+    sentences, dropped_words = zip(*[drop_each_word(s) for s in seqs])
+    sentences = [s for batch in sentences for s in batch]
+    dropped_words = [w for batch in dropped_words for w in batch]
+
+    return sentences, dropped_words
+
+
+def drop_each_word(sentence:str):
+    sentences, dropped_words = [], []
+    words = group_bpes_into_words(sentence)
+    
+    for i in range(len(words)):
+        sentences.append(' '.join(words[:i] + [DROP_WORD] + words[i+1:]))
+        dropped_words.append(words[i])
+        
+    return sentences, dropped_words
+    
