@@ -111,35 +111,35 @@ class UMTTrainer:
 
         # Discriminator step
         # We should pick elements which are not PADs
-        domains_preds_src = self.discriminator(encodings_src, src_noised).squeeze()
-        domains_preds_trg = self.discriminator(encodings_trg, trg_noised).squeeze()
+        #domains_preds_src = self.discriminator(encodings_src, src_noised).squeeze()
+        #domains_preds_trg = self.discriminator(encodings_trg, trg_noised).squeeze()
 
         # Training discriminator on true domains
-        discr_loss_src = self.adv_criterion(domains_preds_src, torch.zeros_like(domains_preds_src))
-        discr_loss_trg = self.adv_criterion(domains_preds_trg, torch.ones_like(domains_preds_trg))
-        total_discriminator_loss += (discr_loss_src + discr_loss_trg)
+        #discr_loss_src = self.adv_criterion(domains_preds_src, torch.zeros_like(domains_preds_src))
+        #discr_loss_trg = self.adv_criterion(domains_preds_trg, torch.ones_like(domains_preds_trg))
+        #total_discriminator_loss += (discr_loss_src + discr_loss_trg)
 
         # Training generator on fake domains
-        gen_loss_src = self.adv_criterion(domains_preds_src, torch.ones_like(domains_preds_src))
-        gen_loss_trg = self.adv_criterion(domains_preds_trg, torch.zeros_like(domains_preds_trg))
-        total_transformer_loss += ((gen_loss_src + gen_loss_trg) * self.gen_loss_coef)
+        #gen_loss_src = self.adv_criterion(domains_preds_src, torch.ones_like(domains_preds_src))
+        #gen_loss_trg = self.adv_criterion(domains_preds_trg, torch.zeros_like(domains_preds_trg))
+        #total_transformer_loss += ((gen_loss_src + gen_loss_trg) * self.gen_loss_coef)
 
         # Backward passes
         self.transformer_optimizer.zero_grad()
         total_transformer_loss.backward(retain_graph=True)
         self.transformer_optimizer.step()
 
-        self.discriminator_optimizer.zero_grad()
-        total_discriminator_loss.backward()
-        self.discriminator_optimizer.step()
+        #self.discriminator_optimizer.zero_grad()
+        #total_discriminator_loss.backward()
+        #self.discriminator_optimizer.step()
 
         # Saving metrics
         self.train_scores['dae_loss_src'].append(dae_loss_src.data[0])
         self.train_scores['dae_loss_trg'].append(dae_loss_trg.data[0])
-        self.train_scores['discr_loss_src'].append(discr_loss_src.data[0])
-        self.train_scores['discr_loss_trg'].append(discr_loss_trg.data[0])
-        self.train_scores['gen_loss_src'].append(gen_loss_src.data[0])
-        self.train_scores['gen_loss_trg'].append(gen_loss_trg.data[0])
+        #self.train_scores['discr_loss_src'].append(discr_loss_src.data[0])
+        #self.train_scores['discr_loss_trg'].append(discr_loss_trg.data[0])
+        #self.train_scores['gen_loss_src'].append(gen_loss_src.data[0])
+        #self.train_scores['gen_loss_trg'].append(gen_loss_trg.data[0])
 
     def validate_bleu(self, val_data, return_results=False):
         all_translations_src_to_trg = []
@@ -214,8 +214,8 @@ class UMTTrainer:
         losses_to_display = [
             ('dae_loss_src', 'dae_loss_trg', 221),
             ('loss_bt_src', 'loss_bt_trg', 222),
-            ('discr_loss_src', 'discr_loss_trg', 223),
-            ('gen_loss_src', 'gen_loss_trg', 224)
+            #('discr_loss_src', 'discr_loss_trg', 223),
+            #('gen_loss_src', 'gen_loss_trg', 224)
         ]
 
         plt.figure(figsize=[16,8])
