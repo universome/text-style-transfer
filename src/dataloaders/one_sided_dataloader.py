@@ -12,7 +12,11 @@ class OneSidedDataloader(BaseDataloader):
         This dataloader loads batches for a single corpus (not two parallel ones)
         It is used to train language models.
     """
-    def __init__(self, seqs, batch_size=16, shuffle=False):
+    def __init__(self, seqs, batch_size=16, shuffle=False, unpack=False, pad=True):
+        """
+        :param unpack: if True, we are given a multidimensional input and should convert
+                       each batch of size [batch_size, n, ...] to [n, batch_size, ...]
+        """
         assert batch_size > 0
         assert len(seqs) >= batch_size
 
@@ -21,6 +25,8 @@ class OneSidedDataloader(BaseDataloader):
         self._batch_size = batch_size
         self._iter_count = 0
         self._should_shuffle = shuffle
+        self._should_unpack = unpack
+        self._should_pad = pad
 
         if self._should_shuffle:
             self.shuffle()
@@ -36,8 +42,13 @@ class OneSidedDataloader(BaseDataloader):
         end_idx = (batch_idx + 1) * self._batch_size
 
         seqs = self._seqs[start_idx:end_idx]
-        seqs = [[constants.BOS] + s + [constants.EOS] for s in seqs]
-        seqs = pad_to_longest(seqs)
+        
+        if self._should_pad:
+            seqs = [[constants.BOS] + s + [constants.EOS] for s in seqs]
+            seqs = pad_to_longest(seqs)
+            
+        if self._should_unpack:
+            seqs = np.array(seqs).transpose()
 
         return seqs
 

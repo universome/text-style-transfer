@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 
 from .helpers import * # TODO: move helper functions somewhere
+from .modules import Encoder, Decoder
 from src.utils.common import one_hot_seqs_to_seqs, variable
 from src.vocab import constants
 

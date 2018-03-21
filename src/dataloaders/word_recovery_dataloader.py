@@ -72,12 +72,17 @@ class WordRecoveryDataloader(BaseDataloader):
         return main_seqs, seqs_to_mix, main_seqs_trg, seqs_to_mix_trg
 
 
-def drop_random_word(seq):
-    words = group_bpes_into_words(seq)
-    i = random.choice(range(len(words)))
+def drop_random_word(seq:str):
+    word_groups = group_bpes_into_words(seq)
 
-    sentence = ' '.join(words[:i] + [DROP_WORD] + words[i+1:])
-    dropped_word = words[i]
+    # Let's detect normal words, so model never needs to predict punctuation
+    # (cause there is too much punctuation and it overfits on it)
+    words = [w.replace('@@ ', '') for w in word_groups]
+    normal_words_idx = get_words_idx(words)
+    i = random.choice(normal_words_idx)
+
+    sentence = ' '.join(word_groups[:i] + [DROP_WORD] + word_groups[i+1:])
+    dropped_word = word_groups[i]
 
     return sentence, dropped_word
 
@@ -101,7 +106,7 @@ def group_bpes_into_words(sentence:str):
         if bpe[-2:] == '@@':
             curr_group.append(bpe)
             continue
-        
+
         curr_group.append(bpe)
         groups.append(' '.join(curr_group))
         curr_group = []
@@ -134,25 +139,29 @@ def sample_seqs(main_seqs:list, seqs_to_mix:list, mixing_coef:float):
     return main_seqs, seqs_to_mix
 
 
-def drop_each_word_many(sentences:list):
-    """
-    We sequentilly replace each word from the sentence with __DROP__.
-    In such a way we get `n` sentences from a sentence with `n` words.
-    """
-    sentences, dropped_words = zip(*[drop_each_word(s) for s in seqs])
-    sentences = [s for batch in sentences for s in batch]
-    dropped_words = [w for batch in dropped_words for w in batch]
-
-    return sentences, dropped_words
-
-
 def drop_each_word(sentence:str):
+    """
+    We sequentilly replace each word from the sentence with __DROP__ token.
+    In such a way we get `n` sentences from a sentence with `n` *normal* words
+    (normal word is the word which does not contain punctuation symbols)
+    """
     sentences, dropped_words = [], []
-    words = group_bpes_into_words(sentence)
-    
-    for i in range(len(words)):
-        sentences.append(' '.join(words[:i] + [DROP_WORD] + words[i+1:]))
-        dropped_words.append(words[i])
-        
-    return sentences, dropped_words
-    
+    word_groups = group_bpes_into_words(sentence)
+    words = [w.replace('@@ ', '') for w in word_groups]
+    normal_words_idx = get_words_idx(words)
+    normal_words_idx_set = set(normal_words_idx)
+
+    for i in range(len(word_groups)):
+        if not i in normal_words_idx_set: continue
+        sentences.append(' '.join(word_groups[:i] + [DROP_WORD] + word_groups[i+1:]))
+        dropped_words.append(word_groups[i])
+
+    return sentences, dropped_words, normal_words_idx
+
+
+def get_words_idx(words):
+    """
+    Given list of words this function tries to guesses
+    if this is the normal word or punctuation
+    """
+    return [i for i,w in enumerate(words) if w.isalpha()]
