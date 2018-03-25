@@ -1,7 +1,10 @@
+from itertools import chain
+
 import torch
 import torch.nn as nn
 
 from . import Transformer
+from src.utils.common import variable, one_hot_seqs_to_seqs
 
 
 class TransformerClassifier(nn.Module):

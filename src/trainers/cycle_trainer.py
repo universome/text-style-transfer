@@ -1,4 +1,5 @@
 from copy import deepcopy
+from itertools import chain
 
 import torch
 from torch.autograd import Variable
@@ -21,10 +22,8 @@ SCORES_TITLES = {
     'trg_reconstruction_loss': '[trg->src->trg] cycle loss',
     'gen_src_to_trg_loss': '[src->trg] generator loss',
     'gen_trg_to_src_loss': '[trg->src] generator loss',
-    'discr_src_loss_on_true': '[src] discriminator loss on true data',
-    'discr_src_loss_on_fake': '[src] discriminator loss on fake data',
-    'discr_trg_loss_on_true': '[trg] discriminator loss on true data',
-    'discr_trg_loss_on_fake': '[trg] discriminator loss on fake data',
+    'critic_src_loss': '[src] Critic loss',
+    'critic_trg_loss': '[trg] Critic loss',
 
     # Validation metrics
     'src_to_trg_bleu': '[src->trg] BLEU score',
@@ -37,7 +36,7 @@ class CycleTrainer:
                  discriminator_src, discriminator_trg, vocab_src, vocab_trg,
                  transformer_src_to_trg_optimizer, transformer_trg_to_src_optimizer,
                  discriminator_src_optimizer, discriminator_trg_optimizer,
-                 reconstruct_src_criterion, reconstruct_trg_criterion, adv_criterion, config):
+                 reconstruct_src_criterion, reconstruct_trg_criterion, config):
 
         self.transformer_src_to_trg = transformer_src_to_trg
         self.transformer_trg_to_src = transformer_trg_to_src
@@ -51,7 +50,6 @@ class CycleTrainer:
         self.discriminator_trg_optimizer = discriminator_trg_optimizer
         self.reconstruct_src_criterion = reconstruct_src_criterion
         self.reconstruct_trg_criterion = reconstruct_trg_criterion
-        self.adv_criterion = adv_criterion
 
         if use_cuda:
             self.transformer_src_to_trg.cuda()
@@ -60,7 +58,6 @@ class CycleTrainer:
             self.discriminator_trg.cuda()
             self.reconstruct_src_criterion.cuda()
             self.reconstruct_trg_criterion.cuda()
-            self.adv_criterion.cuda()
 
         self.num_iters_done = 0
         self.num_epochs_done = 0
@@ -68,12 +65,11 @@ class CycleTrainer:
         self.max_len = config.get('max_len', 50)
         self.temperature_update_scheme = config.get('temperature_update_scheme', (1,1,0))
         self.generator_loss_coef_update_scheme = config.get('generator_loss_coef_update_scheme', (1,1,0))
+        self.critic_clip_val = config.get('critic_clip_val', 0.01)
 
         self.train_scores = {
-            'discr_src_loss_on_true': [],
-            'discr_src_loss_on_fake': [],
-            'discr_trg_loss_on_true': [],
-            'discr_trg_loss_on_fake': [],
+            'critic_src_loss': [],
+            'critic_trg_loss': [],
             'gen_src_to_trg_loss': [],
             'gen_trg_to_src_loss': [],
             'src_reconstruction_loss': [],
@@ -103,45 +99,24 @@ class CycleTrainer:
             self.num_epochs_done += 1
 
     def train_on_batch(self, batch):
+        self.transformer_src_to_trg.train()
+        self.transformer_trg_to_src.train()
+
         src, trg = batch
         # Normal forward pass
         preds_src_to_trg = self.transformer_src_to_trg.differentiable_translate(src, self.vocab_trg, max_len=30, temperature=self.temperature())
         preds_trg_to_src = self.transformer_trg_to_src.differentiable_translate(trg, self.vocab_src, max_len=30, temperature=self.temperature())
 
         # Running our discriminators to predict domains
-        # Target discriminator
-        true_domains_preds_trg = self.discriminator_trg(trg)
-        fake_domains_preds_trg = self.discriminator_trg(preds_src_to_trg, one_hot_input=True)
-        true_domains_preds_src = self.discriminator_src(src)
-        fake_domains_preds_src = self.discriminator_src(preds_trg_to_src, one_hot_input=True)
+        true_domains_logits_trg = self.discriminator_trg(trg)
+        fake_domains_logits_trg = self.discriminator_trg(preds_src_to_trg, one_hot_input=True)
+        true_domains_logits_src = self.discriminator_src(src)
+        fake_domains_logits_src = self.discriminator_src(preds_trg_to_src, one_hot_input=True)
 
-        true_domains_y_trg = Variable(torch.zeros(len(trg)))
-        fake_domains_y_trg = Variable(torch.ones(len(preds_src_to_trg)))
-        true_domains_y_src = Variable(torch.zeros(len(src)))
-        fake_domains_y_src = Variable(torch.ones(len(preds_trg_to_src)))
-
-        # Revert classes for generator
-        fake_domains_y_trg_for_gen = Variable(torch.zeros(len(preds_src_to_trg)))
-        fake_domains_y_src_for_gen = Variable(torch.zeros(len(preds_trg_to_src)))
-
-        if use_cuda:
-            true_domains_y_trg = true_domains_y_trg.cuda()
-            fake_domains_y_trg = fake_domains_y_trg.cuda()
-            true_domains_y_src = true_domains_y_src.cuda()
-            fake_domains_y_src = fake_domains_y_src.cuda()
-            fake_domains_y_trg_for_gen = fake_domains_y_trg_for_gen.cuda()
-            fake_domains_y_src_for_gen = fake_domains_y_src_for_gen.cuda()
-
-        discr_src_loss_on_true = self.adv_criterion(true_domains_preds_src, true_domains_y_src)
-        discr_src_loss_on_fake = self.adv_criterion(fake_domains_preds_src, fake_domains_y_src)
-        discr_trg_loss_on_true = self.adv_criterion(true_domains_preds_trg, true_domains_y_trg)
-        discr_trg_loss_on_fake = self.adv_criterion(fake_domains_preds_trg, fake_domains_y_trg)
-        discr_src_loss = discr_src_loss_on_true + discr_src_loss_on_fake
-        discr_trg_loss = discr_trg_loss_on_true + discr_trg_loss_on_fake
-
-        # Uff, ok. Let's compute losses for our generators
-        gen_src_to_trg_loss = self.adv_criterion(fake_domains_preds_trg, fake_domains_y_trg_for_gen) * self.generator_loss_coef()
-        gen_trg_to_src_loss = self.adv_criterion(fake_domains_preds_src, fake_domains_y_src_for_gen) * self.generator_loss_coef()
+        critic_src_loss = -(true_domains_logits_src - fake_domains_logits_src).mean()
+        critic_trg_loss = -(true_domains_logits_trg - fake_domains_logits_trg).mean()
+        gen_src_to_trg_loss = -fake_domains_logits_trg.mean() * self.generator_loss_coef()
+        gen_trg_to_src_loss = -fake_domains_logits_src.mean() * self.generator_loss_coef()
 
         # "Back-translation" passes
         preds_src_to_trg_to_src = self.transformer_trg_to_src(preds_src_to_trg, src, one_hot_src=True)
@@ -156,8 +131,8 @@ class CycleTrainer:
         self.discriminator_src_optimizer.zero_grad()
         self.discriminator_trg_optimizer.zero_grad()
 
-        discr_src_loss.backward(retain_graph=True)
-        discr_trg_loss.backward(retain_graph=True)
+        critic_src_loss.backward(retain_graph=True)
+        critic_trg_loss.backward(retain_graph=True)
 
         self.discriminator_src_optimizer.step()
         self.discriminator_trg_optimizer.step()
@@ -174,17 +149,20 @@ class CycleTrainer:
         self.transformer_src_to_trg_optimizer.step()
         self.transformer_trg_to_src_optimizer.step()
 
+        self.clip_critic_weights()
+
         # Saving metrics
-        self.train_scores['discr_src_loss_on_true'].append(discr_src_loss_on_true.data[0])
-        self.train_scores['discr_src_loss_on_fake'].append(discr_src_loss_on_fake.data[0])
-        self.train_scores['discr_trg_loss_on_true'].append(discr_trg_loss_on_true.data[0])
-        self.train_scores['discr_trg_loss_on_fake'].append(discr_trg_loss_on_fake.data[0])
+        self.train_scores['critic_src_loss'].append(critic_src_loss.data[0])
+        self.train_scores['critic_trg_loss'].append(critic_trg_loss.data[0])
         self.train_scores['gen_src_to_trg_loss'].append(gen_src_to_trg_loss.data[0] / self.generator_loss_coef())
         self.train_scores['gen_trg_to_src_loss'].append(gen_trg_to_src_loss.data[0] / self.generator_loss_coef())
         self.train_scores['src_reconstruction_loss'].append(src_reconstruction_loss.data[0])
         self.train_scores['trg_reconstruction_loss'].append(trg_reconstruction_loss.data[0])
 
     def validate_bleu(self, val_data, max_len=50, beam_size=1, return_translations=False):
+        self.transformer_src_to_trg.eval()
+        self.transformer_trg_to_src.eval()
+
         all_translations_src_to_trg = []
         all_translations_trg_to_src = []
         all_targets_src_to_trg = []
@@ -220,8 +198,7 @@ class CycleTrainer:
         losses_to_display = [
             ('src_reconstruction_loss', 'trg_reconstruction_loss', 221),
             ('gen_src_to_trg_loss', 'gen_trg_to_src_loss', 222),
-            ('discr_src_loss_on_true', 'discr_src_loss_on_fake', 223),
-            ('discr_trg_loss_on_true', 'discr_trg_loss_on_fake', 224)
+            ('critic_src_loss', 'critic_trg_loss', 223)
         ]
 
         plt.figure(figsize=[16,8])
@@ -241,15 +218,14 @@ class CycleTrainer:
             plt.legend(loc='lower left')
             plt.grid()
 
-        plt.show()
-
         # Let's also plot validation BLEU scores
-        plt.figure(figsize=[8,4])
+        plt.subplot(224)
         plt.title('Validation BLEU')
         plt.plot(self.val_iters, np.array(self.val_scores['src_to_trg_bleu']), label='[src->trg] BLEU')
         plt.plot(self.val_iters, np.array(self.val_scores['trg_to_src_bleu']), label='[trg->src] BLEU')
         plt.grid()
         plt.legend()
+
         plt.show()
 
     def temperature(self):
@@ -257,3 +233,7 @@ class CycleTrainer:
 
     def generator_loss_coef(self):
         return compute_param_by_scheme(self.generator_loss_coef_update_scheme, self.num_iters_done)
+    
+    def clip_critic_weights(self):
+        for p in chain(self.discriminator_trg.parameters(), self.discriminator_src.parameters()):
+            p.data.clamp_(-self.critic_clip_val, self.critic_clip_val)
