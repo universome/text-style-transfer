@@ -98,7 +98,7 @@ class Transformer(nn.Module):
 
         return (out, enc_output) if return_encodings else out
 
-    def translate_batch(self, src_seq, beam_size=6, max_len=50,
+    def translate_batch(self, src_seq, beam_size=6, max_len=50, return_beams=False,
                         use_src_embs_in_decoder=False, use_trg_embs_in_encoder=False):
 
         batch_size = src_seq.size(0)
@@ -176,8 +176,9 @@ class Transformer(nn.Module):
             # Update the remaining size
             n_remaining_sents = len(active_seq_idxs)
 
-        #- Return translations
-        return extract_best_translation_from_beams(beams)
+        translations = extract_best_translation_from_beams(beams)
+        
+        return (translations, beams) if return_beams else translations
 
     def differentiable_translate(self, src_seq, vocab_trg, max_len=50, temperature=1,
                                  use_src_embs_in_decoder=False, use_trg_embs_in_encoder=False):
