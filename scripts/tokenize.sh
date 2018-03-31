@@ -3,7 +3,7 @@
 mosesdecoder="ext-libs/mosesdecoder"
 input_file=$1
 output_file=$2
-threads=10
+threads=20
 
 echo "Input file: $input_file"
 echo "Output file: $output_file"
