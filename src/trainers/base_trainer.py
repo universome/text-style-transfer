@@ -8,6 +8,7 @@ class BaseTrainer:
         self.max_num_epochs = config.get('max_num_epochs', 10)
         self.validate_every = config.get('validate_every')
         self.plot_every = config.get('plot_every')
+        self.early_stopping_last_n_iters = config.get('early_stopping_last_n_iters', -1)
         self.log_file = config.get('log_file')
         self.should_validate = not self.validate_every is None
         self.should_plot = not self.plot_every is None
@@ -21,6 +22,7 @@ class BaseTrainer:
             try:
                 for batch in tqdm(training_data, leave=False):
                     self.train_step(batch, val_data)
+                    should_continue = not self.should_early_stop()
             except KeyboardInterrupt:
                 should_continue = False
                 break
@@ -37,6 +39,9 @@ class BaseTrainer:
             self.plot_scores()
 
         self.num_iters_done += 1
+        
+    def should_early_stop(self):
+        return False
 
     def train_on_batch(self, batch):
         pass

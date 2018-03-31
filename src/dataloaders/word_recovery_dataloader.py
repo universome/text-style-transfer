@@ -88,6 +88,8 @@ def drop_random_word(seq:str):
 
 
 def drop_random_word_many(seqs):
+    if len(seqs) == 0: return [], []
+
     seqs, dropped_words = zip(*[drop_random_word(s) for s in seqs])
 
     return list(seqs), list(dropped_words)

@@ -173,3 +173,14 @@ class WordRecoveryTrainer(BaseTrainer):
                 f.write('Prediction: ' + preds[i] + '\n')
 
             f.write('=======================================================================================\n')
+    
+    def should_early_stop(self):
+        if self.early_stopping_last_n_iters < 1: return False
+        val_scores = self.val_scores['main_seqs_accuracy']
+        n_val_scores_to_take = self.early_stopping_last_n_iters // self.validate_every
+        
+        if len(val_scores) < n_val_scores_to_take: return False
+        
+        should_early_stop = np.argmax(val_scores[-n_val_scores_to_take:]) is 0
+        
+        return should_early_stop
