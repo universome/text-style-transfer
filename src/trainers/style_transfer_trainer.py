@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from src.umt_trainer import UMTTrainer
+from src.trainers import UMTTrainer
 from src.utils.data_utils import pad_to_longest, token_ids_to_sents
 from src.vocab import constants
 from src.utils.bleu import compute_bleu_for_sents
@@ -17,7 +17,8 @@ class StyleTransferTrainer(UMTTrainer):
             'bleu_trg_to_src_to_trg': []
         }
 
-    def validate_bleu(self, val_data, return_results=False, beam_size=4):
+    def validate_bleu(self, val_data, return_results=False, beam_size=1):
+        self.transformer.eval()
         sources = []
         targets = []
         translations_src_to_trg = []
@@ -27,17 +28,17 @@ class StyleTransferTrainer(UMTTrainer):
 
         for src, trg in val_data:
             src_to_trg = self.transformer.translate_batch(
-                src, max_len=self.max_seq_len, beam_size=beam_size)
+                src, 'trg', max_len=self.max_seq_len, beam_size=beam_size)
             trg_to_src = self.transformer.translate_batch(
-                trg, max_len=self.max_seq_len, beam_size=beam_size, use_src_embs_in_decoder=True, use_trg_embs_in_encoder=True)
+                trg, 'src', max_len=self.max_seq_len, beam_size=beam_size)
 
             src_to_trg_var = pad_to_longest([[constants.BOS] + s for s in src_to_trg], volatile=True)
             trg_to_src_var = pad_to_longest([[constants.BOS] + s for s in trg_to_src], volatile=True)
 
             src_to_trg_to_src = self.transformer.translate_batch(
-                src_to_trg_var, max_len=self.max_seq_len, beam_size=beam_size, use_src_embs_in_decoder=True, use_trg_embs_in_encoder=True)
+                src_to_trg_var, 'src', max_len=self.max_seq_len, beam_size=beam_size)
             trg_to_src_to_trg = self.transformer.translate_batch(
-                trg_to_src_var, max_len=self.max_seq_len, beam_size=beam_size)
+                trg_to_src_var, 'trg', max_len=self.max_seq_len, beam_size=beam_size)
 
             sources += token_ids_to_sents(src, self.vocab_src)
             targets += token_ids_to_sents(trg, self.vocab_trg)

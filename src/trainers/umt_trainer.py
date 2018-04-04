@@ -20,55 +20,38 @@ SCORES_TITLES = {
     'dae_loss_trg': '[trg] lang AE loss',
     'loss_bt_src': '[src] lang back-translation loss',
     'loss_bt_trg': '[trg] lang back-translation loss',
-    'discr_loss_src': '[src] lang discriminator loss',
-    'discr_loss_trg': '[trg] lang discriminator loss',
-    'gen_loss_src': '[src] lang generator loss',
-    'gen_loss_trg': '[trg] lang generator loss',
     'src_to_trg_bleu': '[src->trg] BLEU score',
     'trg_to_src_bleu': '[trg->src] BLEU score',
 }
 
 
 class UMTTrainer:
-    def __init__(self, transformer, discriminator, vocab_src, vocab_trg,
-                 transformer_optimizer, discriminator_optimizer,
-                 reconstruct_src_criterion, reconstruct_trg_criterion, adv_criterion, config):
+    def __init__(self, transformer, transformer_optimizer, vocab_src, vocab_trg,
+                 reconstruct_src_criterion, reconstruct_trg_criterion, config):
 
         self.transformer = transformer
-        self.discriminator = discriminator
+        self.transformer_optimizer = transformer_optimizer
         self.vocab_src = vocab_src
         self.vocab_trg = vocab_trg
-        self.transformer_optimizer = transformer_optimizer
-        self.discriminator_optimizer = discriminator_optimizer
         self.reconstruct_src_criterion = reconstruct_src_criterion
         self.reconstruct_trg_criterion = reconstruct_trg_criterion
-        self.adv_criterion = adv_criterion
 
         if use_cuda:
             self.transformer.cuda()
-            self.discriminator.cuda()
-            self.transformer.cuda()
-            self.discriminator.cuda()
             self.reconstruct_src_criterion.cuda()
             self.reconstruct_trg_criterion.cuda()
-            self.adv_criterion.cuda()
 
         self.num_iters_done = 0
         self.num_epochs_done = 0
         self.max_num_epochs = config.get('max_num_epochs', 100)
         self.start_bt_from_iter = config.get('start_bt_from_iter', 500)
         self.max_seq_len = config.get('max_seq_len', 50)
-        self.gen_loss_coef = config.get('gen_loss_coef', 1)
 
         self.train_scores = {
             'dae_loss_src': [],
             'dae_loss_trg': [],
             'loss_bt_src': [],
             'loss_bt_trg': [],
-            'discr_loss_src': [],
-            'discr_loss_trg': [],
-            'gen_loss_src': [],
-            'gen_loss_trg': []
         }
 
         self.val_scores = {'src_to_trg_bleu': [], 'trg_to_src_bleu': []}
@@ -99,7 +82,7 @@ class UMTTrainer:
 
         # DAE step
         self.transformer.train()
-        dae_loss_src, dae_loss_trg, encodings_src, encodings_trg = self._run_dae(src_noised, trg_noised, src, trg)
+        dae_loss_src, dae_loss_trg = self._run_dae(src_noised, trg_noised, src, trg)
         total_transformer_loss += (dae_loss_src + dae_loss_trg)
 
         # (Back) translation step
@@ -177,21 +160,20 @@ class UMTTrainer:
 
     def _run_dae(self, src_noised, trg_noised, src, trg):
         # Computing translation for ~src->src and ~trg->trg autoencoding tasks
-        preds_src, encodings_src = self.transformer(src_noised, src, return_encodings=True, use_src_embs_in_decoder=True)
-        preds_trg, encodings_trg = self.transformer(trg_noised, trg, return_encodings=True, use_trg_embs_in_encoder=True)
+        preds_src = self.transformer(src_noised, src, 'src')
+        preds_trg = self.transformer(trg_noised, trg, 'trg')
 
         # Computing losses
         dae_loss_src = self.reconstruct_src_criterion(preds_src, src[:, 1:].contiguous().view(-1))
         dae_loss_trg = self.reconstruct_trg_criterion(preds_trg, trg[:, 1:].contiguous().view(-1))
 
-        return dae_loss_src, dae_loss_trg, encodings_src, encodings_trg
+        return dae_loss_src, dae_loss_trg
 
     def _run_bt(self, src, trg):
         self.transformer.eval()
         # Get translations for backtranslation
-        bt_src_to_trg = self.transformer.translate_batch(src, beam_size=2, max_len=self.max_seq_len-2)
-        bt_trg_to_src = self.transformer.translate_batch(trg, beam_size=2, max_len=self.max_seq_len-2,
-                                                         use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
+        bt_src_to_trg = self.transformer.translate_batch(src, 'trg', beam_size=1, max_len=self.max_seq_len-2)
+        bt_trg_to_src = self.transformer.translate_batch(trg, 'src', beam_size=1, max_len=self.max_seq_len-2)
 
         # We should prepend our sentences with BOS symbol
         bt_src_to_trg = pad_to_longest([[constants.BOS] + s for s in bt_src_to_trg])
@@ -199,8 +181,8 @@ class UMTTrainer:
 
         # Computing predictions for back-translated sentences
         self.transformer.train()
-        bt_src_to_trg_to_src_preds = self.transformer(bt_src_to_trg, src, use_trg_embs_in_encoder=True, use_src_embs_in_decoder=True)
-        bt_trg_to_src_to_trg_preds = self.transformer(bt_trg_to_src, trg)
+        bt_src_to_trg_to_src_preds = self.transformer(bt_src_to_trg, src, 'src')
+        bt_trg_to_src_to_trg_preds = self.transformer(bt_trg_to_src, trg, 'trg')
 
         # Computing losses
         loss_bt_src = self.reconstruct_src_criterion(bt_src_to_trg_to_src_preds, src[:, 1:].contiguous().view(-1))
