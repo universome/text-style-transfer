@@ -26,9 +26,8 @@ class Encoder(nn.Module):
 
         self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=constants.PAD)
 
-        self.layer_stack = nn.ModuleList([
-            EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
-            for _ in range(n_layers)])
+        layer = lambda: EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
+        self.layer_stack = nn.ModuleList([layer() for _ in range(n_layers)])
 
     def forward(self, src_seq, embs=None, one_hot_src=False):
         # Word embedding look up
@@ -66,9 +65,8 @@ class Decoder(nn.Module):
         self.position_enc.weight.data = position_encoding_init(n_position, d_word_vec)
         self.tgt_word_emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=constants.PAD)
 
-        self.layer_stack = nn.ModuleList([
-            DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
-            for _ in range(n_layers)])
+        layer = lambda: DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
+        self.layer_stack = nn.ModuleList([layer() for _ in range(n_layers)])
 
     def forward(self, tgt_seq, src_seq, enc_output, embs=None, cache=None, one_hot_src=False, one_hot_trg=False):
         """

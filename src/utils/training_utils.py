@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from src.vocab import constants
+
 
 use_cuda = torch.cuda.is_available()
 
