@@ -33,7 +33,7 @@ class Batcher(BaseDataloader):
             self._src_seqs, self._tgt_seqs = zip(*paired_insts)
         else:
             random.shuffle(self._src_seqs)
-            random.shuffle(self._trg_seqs)
+            random.shuffle(self._tgt_seqs)
 
     def step(self):
         batch_idx = self._iter_count
