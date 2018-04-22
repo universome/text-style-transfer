@@ -4,17 +4,17 @@ import numpy as np
 
 
 Constants = namedtuple('Constants', [
+    'UNK', 'UNK_WORD',
+    'PAD', 'PAD_WORD',
     'BOS', 'BOS_WORD',
     'EOS', 'EOS_WORD',
-    'UNK', 'UNK_WORD',
-    'PAD', 'PAD_WORD'
 ])
 
 constants = Constants(
-    0, '__BOS__',
-    1, '__EOS__',
-    2, '__UNK__',
-    3, '__PAD__'
+    0, '__UNK__',
+    1, '__PAD__',
+    2, '__BOS__',
+    3, '__EOS__',
 )
 
 class Vocab:

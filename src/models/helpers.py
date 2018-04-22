@@ -65,7 +65,7 @@ def token_to_position(token, index, one_hot_input=False):
     if type(token) == Variable: token = token.data
     if one_hot_input: token = np.argmax(token)
 
-    return 0 if token == constants.PAD else index + 1
+    return 0 if token == constants.PAD else (index+1)
 
 
 def update_active_seq(seq_var, active_seq_idxs, n_remaining_sents, volatile=True):
