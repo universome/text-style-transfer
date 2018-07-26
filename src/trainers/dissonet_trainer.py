@@ -13,9 +13,11 @@ from firelab.utils import cudable
 
 from src.models.dissonet import RNNEncoder, RNNDecoder
 from src.models import FFN
-# from src.losses import compute_bleu_for_sents
-# from src.utils.common import itos_many
-# from src.models.utils import inference
+from src.utils.data_utils import itos_many
+from src.losses.bleu import compute_bleu_for_sents
+from src.losses.ce_without_pads import cross_entropy_without_pads
+from src.losses.wgan_loss import WGANLoss
+from src.inference import inference
 
 
 class DissoNetTrainer(BaseTrainer):
@@ -48,39 +50,22 @@ class DissoNetTrainer(BaseTrainer):
         hid_size = self.config['hp'].get('hid_size')
         voc_size = len(self.vocab)
 
-        # Defining models
         self.encoder = cudable(RNNEncoder(emb_size, hid_size, voc_size))
         self.decoder = cudable(RNNDecoder(emb_size, hid_size, voc_size))
         self.critic = cudable(FFN(hid_size // 2, 1, hid_size=hid_size))
         self.motivator = cudable(FFN(hid_size // 2, 1, hid_size=hid_size))
 
-        self.init_criterions()
+    def init_criterions(self):
+        self.rec_criterion = cross_entropy_without_pads(self.vocab)
+        self.critic_criterion = WGANLoss()
+        self.motivator_criterion = nn.BCEWithLogitsLoss()
 
-        # Defining optimizers
+    def init_optimizers(self):
         lr = self.config['hp'].get('lr', 1e-4)
+
         self.critic_optim = Adam(self.critic.parameters(), lr=lr)
         self.motivator_optim = Adam(self.motivator.parameters(), lr=lr)
         self.ae_optim = Adam(chain(self.encoder.parameters(), self.decoder.parameters()), lr=lr)
-
-    def init_criterions(self):
-        # Reconstruction loss
-        weights = cudable(torch.ones(len(self.vocab)))
-        weights[self.vocab.stoi['<pad>']] = 0
-        self.rec_criterion = nn.CrossEntropyLoss(weights)
-
-        # Critic loss. Is similar to WGAN (but without lipschitz constraints)
-        class CriticLoss(nn.Module):
-            def __init__(self):
-                super(CriticLoss, self).__init__()
-
-            def forward(self, real, fake):
-                return real.mean() - fake.mean()
-
-        self.critic_criterion = CriticLoss()
-
-        # Motivator loss
-        self.motivator_criterion = nn.BCEWithLogitsLoss()
-
 
     def train_on_batch(self, batch):
         rec_loss, motivator_loss, critic_loss, ae_loss = self.loss_on_batch(batch)
@@ -139,41 +124,103 @@ class DissoNetTrainer(BaseTrainer):
         return rec_loss, motivator_loss, critic_loss, ae_loss
 
     def validate(self):
-        return
         rec_losses = []
+        motivator_losses = []
+        critic_losses = []
 
         for batch in self.val_dataloader:
-            rec_losses.append(self.loss_on_batch(batch).item())
+            rec_loss, motivator_loss, critic_loss, _ = self.loss_on_batch(batch)
+            rec_losses.append(rec_loss.item())
+            motivator_losses.append(motivator_loss.item())
+            critic_losses.append(critic_loss.item())
 
         self.writer.add_scalar('val_rec_loss', np.mean(rec_losses), self.num_iters_done)
-        self.compute_val_bleu()
+        self.writer.add_scalar('val_motivator_loss', np.mean(motivator_losses), self.num_iters_done)
+        self.writer.add_scalar('val_critic_loss', np.mean(critic_losses), self.num_iters_done)
 
-    def compute_val_bleu(self):
+        # Ok, let's now validate style transfer and auto-encoding
+        self.validate_inference()
+
+    def validate_inference(self):
         """
         Performs inference on a val dataloader
         (computes predictions without teacher's forcing)
         """
-        generated, originals = self.inference(self.val_dataloader)
-        bleu = compute_bleu_for_sents(generated, originals)
-        generated = ['[{}] => [{}]'.format(o,g) for o,g in zip(originals, generated)]
-        text = '\n\n'.join(generated)
+        m2o, o2m, m2m, o2o, gm, go = self.transfer_style(self.val_dataloader)
+
+        m2o_bleu = compute_bleu_for_sents(m2o, go)
+        o2m_bleu = compute_bleu_for_sents(o2m, gm)
+        m2m_bleu = compute_bleu_for_sents(m2m, gm)
+        o2o_bleu = compute_bleu_for_sents(o2o, go)
+
+        self.writer.add_scalar('m2o val BLEU', m2o_bleu, self.num_iters_done)
+        self.writer.add_scalar('o2m val BLEU', o2m_bleu, self.num_iters_done)
+        self.writer.add_scalar('m2m val BLEU', m2m_bleu, self.num_iters_done)
+        self.writer.add_scalar('o2o val BLEU', o2o_bleu, self.num_iters_done)
+
+        # Ok, let's log generated sequences
+        texts = [get_text_from_sents(*sents) for sents in zip(m2o, o2m, m2m, o2o, gm, go)]
+        text = '\n===================\n'.join(texts)
 
         self.writer.add_text('Generated examples', text, self.num_iters_done)
-        self.writer.add_scalar('Validation BLEU', bleu, self.num_iters_done)
 
-    def inference(self, dataloader):
+    def transfer_style(self, dataloader):
         """
         Produces predictions for a given dataloader
         """
-        seqs = []
-        originals = []
+        modern_to_original = []
+        original_to_modern = []
+        modern_to_modern = []
+        original_to_original = []
+        gold_modern = []
+        gold_original = []
 
         for batch in dataloader:
-            inputs = cudable(batch.text)
-            encodings = self.encoder(inputs)
-            sentences = inference(self.decoder, encodings, self.vocab)
+            m2o, o2m, m2m, o2o = self.transfer_style_on_batch(batch)
 
-            seqs.extend(sentences)
-            originals.extend(inputs.detach().cpu().numpy().tolist())
+            modern_to_original.extend(m2o)
+            original_to_modern.extend(o2m)
+            modern_to_modern.extend(m2m)
+            original_to_original.extend(o2o)
 
-        return itos_many(seqs, self.vocab), itos_many(originals, self.vocab)
+            gold_modern.extend(batch.modern.detach().cpu().numpy().tolist())
+            gold_original.extend(batch.original.detach().cpu().numpy().tolist())
+
+        # Converting to sentences
+        m2o_sents = itos_many(modern_to_original, self.vocab)
+        o2m_sents = itos_many(original_to_modern, self.vocab)
+        m2m_sents = itos_many(modern_to_modern, self.vocab)
+        o2o_sents = itos_many(original_to_original, self.vocab)
+        gm_sents = itos_many(gold_modern, self.vocab)
+        go_sents = itos_many(gold_original, self.vocab)
+
+        return m2o_sents, o2m_sents, m2m_sents, o2o_sents, gm_sents, go_sents
+
+    def transfer_style_on_batch(self, batch):
+        style_modern, content_modern = self.encoder(batch.modern)
+        style_original, content_original = self.encoder(batch.original)
+
+        modern_to_original_z = torch.cat([style_original, content_modern], dim=1)
+        original_to_modern_z = torch.cat([style_modern, content_original], dim=1)
+        modern_to_modern_z = torch.cat([style_modern, content_modern], dim=1)
+        original_to_original_z = torch.cat([style_original, content_original], dim=1)
+
+        m2o = inference(self.decoder, modern_to_original_z, self.vocab)
+        o2m = inference(self.decoder, original_to_modern_z, self.vocab)
+        m2m = inference(self.decoder, modern_to_modern_z, self.vocab)
+        o2o = inference(self.decoder, original_to_original_z, self.vocab)
+
+        return m2o, o2m, m2m, o2o
+
+
+def get_text_from_sents(m2o_x, o2m_x, m2m_x, o2o_x, gm_x, go_x):
+    # TODO: Move this somewhere from trainer file? Or create some nice template?
+    return """
+        Gold modern: [{}]
+        Gold origin: [{}]
+
+        m2o: [{}]
+        o2m: [{}]
+        m2m: [{}]
+        o2o: [{}]
+    """.format(gm_x, go_x, m2o_x, o2m_x, m2m_x, o2o_x)

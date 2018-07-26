@@ -1,15 +1,14 @@
 import torch
 from torch.autograd import Variable
+from firelab.utils import cudable
 
 from src.vocab import constants
-
-use_cuda = torch.cuda.is_available()
 
 
 def variable(x, **kwargs):
     v = Variable(x, **kwargs)
 
-    return v.cuda() if use_cuda else v
+    return cudable(v)
 
 
 def embed(x, embeddings, one_hot_input=False):
@@ -35,7 +34,6 @@ def one_hot_seqs_to_seqs(seqs):
 
     if type(seqs) is Variable: seqs = seqs.data
 
-    indices = torch.arange(seqs.size(2))
-    if use_cuda: indices = indices.cuda()
+    indices = cudable(torch.arange(seqs.size(2)))
 
     return torch.matmul(seqs.float(), indices).long()
