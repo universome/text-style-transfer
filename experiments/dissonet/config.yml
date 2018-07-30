@@ -4,7 +4,7 @@ data:
   modern: "data/shakespeare/modern.split.tok"
   original: "data/shakespeare/original.split.tok"
 batch_size: 32
-max_num_epochs: 50
+max_num_epochs: 300
 lr: 0.001
 val_freq: 200
 checkpoint_freq_epochs: 1

@@ -3,12 +3,12 @@ import torch.nn as nn
 
 
 class FFN(nn.Module):
-    def __init__(self, input_size, n_hid_layers, dropout=0, hid_size=1024, out_size=1):
+    def __init__(self, input_size, n_hid_layers, dropout=0, hid_size=None, output_size=1):
         super(FFN, self).__init__()
 
         self.n_hid_layers = n_hid_layers
-        self.hid_size = hid_size
         self.input_size = input_size
+        self.hid_size = hid_size or input_size
         self.dropout = dropout
 
         self.nn = nn.Sequential(
@@ -16,7 +16,7 @@ class FFN(nn.Module):
             nn.Linear(self.input_size, self.hid_size),
             nn.SELU(),
             self._init_hidden(),
-            nn.Linear(self.hid_size, out_size),
+            nn.Linear(self.hid_size, output_size),
         )
 
     def _init_hidden(self):

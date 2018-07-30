@@ -51,9 +51,10 @@ class DissoNetTrainer(BaseTrainer):
         voc_size = len(self.vocab)
 
         self.encoder = cudable(RNNEncoder(emb_size, hid_size, voc_size))
+        self.merge_nn = cudable(FFN(hid_size * 2, 1, output_size=hid_size, hid_size=hid_size))
         self.decoder = cudable(RNNDecoder(emb_size, hid_size, voc_size))
-        self.critic = cudable(FFN(hid_size // 2, 1, hid_size=hid_size))
-        self.motivator = cudable(FFN(hid_size // 2, 1, hid_size=hid_size))
+        self.critic = cudable(FFN(hid_size, 1, hid_size=hid_size))
+        self.motivator = cudable(FFN(hid_size, 1, hid_size=hid_size))
 
     def init_criterions(self):
         self.rec_criterion = cross_entropy_without_pads(self.vocab)
@@ -95,8 +96,8 @@ class DissoNetTrainer(BaseTrainer):
         style_original, content_original = self.encoder(batch.original)
 
         # Now we should merge back style and content for decoder
-        hid_modern = torch.cat([style_modern, content_modern], dim=1)
-        hid_original = torch.cat([style_original, content_original], dim=1)
+        hid_modern = self.merge_nn(torch.cat([style_modern, content_modern], dim=1))
+        hid_original = self.merge_nn(torch.cat([style_original, content_original], dim=1))
 
         # Reconstructing
         recs_modern = self.decoder(hid_modern, batch.modern[:, :-1])
@@ -200,10 +201,10 @@ class DissoNetTrainer(BaseTrainer):
         style_modern, content_modern = self.encoder(batch.modern)
         style_original, content_original = self.encoder(batch.original)
 
-        modern_to_original_z = torch.cat([style_original, content_modern], dim=1)
-        original_to_modern_z = torch.cat([style_modern, content_original], dim=1)
-        modern_to_modern_z = torch.cat([style_modern, content_modern], dim=1)
-        original_to_original_z = torch.cat([style_original, content_original], dim=1)
+        modern_to_original_z = self.merge_nn(torch.cat([style_original, content_modern], dim=1))
+        original_to_modern_z = self.merge_nn(torch.cat([style_modern, content_original], dim=1))
+        modern_to_modern_z = self.merge_nn(torch.cat([style_modern, content_modern], dim=1))
+        original_to_original_z = self.merge_nn(torch.cat([style_original, content_original], dim=1))
 
         m2o = inference(self.decoder, modern_to_original_z, self.vocab)
         o2m = inference(self.decoder, original_to_modern_z, self.vocab)
@@ -213,7 +214,7 @@ class DissoNetTrainer(BaseTrainer):
         return m2o, o2m, m2m, o2o
 
 
-def get_text_from_sents(m2o_x, o2m_x, m2m_x, o2o_x, gm_x, go_x):
+def get_text_from_sents(m2o_s, o2m_s, m2m_s, o2o_s, gm_s, go_s):
     # TODO: Move this somewhere from trainer file? Or create some nice template?
     return """
         Gold modern: [{}]
@@ -223,4 +224,4 @@ def get_text_from_sents(m2o_x, o2m_x, m2m_x, o2o_x, gm_x, go_x):
         o2m: [{}]
         m2m: [{}]
         o2o: [{}]
-    """.format(gm_x, go_x, m2o_x, o2m_x, m2m_x, o2o_x)
+    """.format(gm_s, go_s, m2o_s, o2m_s, m2m_s, o2o_s)

@@ -10,11 +10,11 @@ class RNNEncoder(nn.Module):
         self.gru = nn.GRU(emb_size, hid_size, batch_first=True)
 
         self.style_nn = nn.Sequential(
-            nn.Linear(hid_size//2, hid_size//2),
+            nn.Linear(hid_size, hid_size),
             nn.SELU()
         )
         self.content_nn = nn.Sequential(
-            nn.Linear(hid_size//2, hid_size//2),
+            nn.Linear(hid_size, hid_size),
             nn.SELU()
         )
 
@@ -23,7 +23,7 @@ class RNNEncoder(nn.Module):
         _, last_hidden_state = self.gru(embeds)
         state = last_hidden_state.squeeze(0)
 
-        style = self.style_nn(state[:, :self.hid_size//2])
-        content = self.content_nn(state[:, self.hid_size//2:])
+        style = self.style_nn(state)
+        content = self.content_nn(state)
 
         return style, content
