@@ -1,0 +1,12 @@
+title: "BowDecoder experiments"
+trainer: "BowDecoderTrainer"
+data: "data/multi30k/train.en"
+batch_size: 64
+max_num_epochs: 30
+lr: 0.001
+val_freq: 200
+checkpoint_freq_epochs: 1
+random_seed: 42
+hp:
+  emb_size: 512
+  hid_size: 512

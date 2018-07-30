@@ -4,6 +4,7 @@
 # from .cycle_trainer import CycleTrainer
 # from .style_transfer_trainer import StyleTransferTrainer
 from .dissonet_trainer import DissoNetTrainer
+from .bow_decoder_trainer import BowDecoderTrainer
 
 __all__ = [
     # "LMTrainer",
@@ -12,4 +13,5 @@ __all__ = [
     # "CycleTrainer",
     # "StyleTransferTrainer",
     "DissoNetTrainer",
+    "BowDecoderTrainer",
 ]
