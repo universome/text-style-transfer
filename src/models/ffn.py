@@ -15,8 +15,9 @@ class FFN(nn.Module):
             nn.Dropout(self.dropout),
             nn.Linear(self.input_size, self.hid_size),
             nn.SELU(),
+            nn.BatchNorm1d(self.hid_size),
             self._init_hidden(),
-            nn.Linear(self.hid_size, output_size),
+            nn.Linear(self.hid_size, output_size)
         )
 
     def _init_hidden(self):
@@ -26,7 +27,8 @@ class FFN(nn.Module):
             layers += [
                 nn.Dropout(self.dropout),
                 nn.Linear(self.hid_size, self.hid_size),
-                nn.SELU()
+                nn.SELU(),
+                nn.BatchNorm1d(self.hid_size)
             ]
 
         return nn.Sequential(*layers)
