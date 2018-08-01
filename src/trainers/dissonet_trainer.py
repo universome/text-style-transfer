@@ -66,7 +66,7 @@ class DissoNetTrainer(BaseTrainer):
 
         self.critic_optim = Adam(self.critic.parameters(), lr=lr)
         self.motivator_optim = Adam(self.motivator.parameters(), lr=lr)
-        self.ae_optim = Adam(chain(self.encoder.parameters(), self.decoder.parameters()), lr=lr)
+        self.ae_optim = Adam(chain(self.encoder.parameters(), self.decoder.parameters(), self.merge_nn.parameters()), lr=lr)
 
     def train_on_batch(self, batch):
         rec_loss, motivator_loss, critic_loss, ae_loss = self.loss_on_batch(batch)
