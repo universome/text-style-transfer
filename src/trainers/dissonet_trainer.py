@@ -25,7 +25,7 @@ class DissoNetTrainer(BaseTrainer):
         super(DissoNetTrainer, self).__init__(config)
 
     def init_dataloaders(self):
-        batch_size = self.config.get('batch_size', 8)
+        batch_size = self.config.get('batch_size', 16)
         project_path = self.config['firelab']['project_path']
         modern_data_path = os.path.join(project_path, self.config['data']['modern'])
         original_data_path = os.path.join(project_path, self.config['data']['original'])
@@ -36,9 +36,9 @@ class DissoNetTrainer(BaseTrainer):
         text = Field(init_token='<bos>', eos_token='<eos>', batch_first=True)
         fields = [('modern', text), ('original', text)]
         examples = [Example.fromlist([m,o], fields) for m,o in zip(modern, original)]
+        train_exs, val_exs = examples[100:], examples[:100]
 
-        dataset = Dataset(examples, fields)
-        self.train_ds, self.val_ds = dataset.split(split_ratio=[0.99, 0.01])
+        self.train_ds, self.val_ds = Dataset(train_exs, fields), Dataset(val_exs, fields)
         text.build_vocab(self.train_ds)
 
         self.vocab = text.vocab

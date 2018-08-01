@@ -7,9 +7,20 @@ batch_size: 32
 max_num_epochs: 300
 lr: 0.001
 val_freq: 200
-checkpoint_freq_epochs: 1
+checkpoint:
+  freq_epochs: 1
+  modules: [
+    "encoder", "decoder", "merge_nn", "critic", "motivator",
+    "critic_optim", "motivator_optim", "ae_optim"
+  ]
 random_seed: 42
 hp:
   emb_size: 1024
   hid_size: 1024
   # grad_clip: 50
+hpo:
+  emb_size: [512, 1024]
+  hid_size: [512, 1024]
+  use_merge_nn: [true, false]
+  # use_attn: [true, false]
+  n_hid_layers: [0, 1, 2]
