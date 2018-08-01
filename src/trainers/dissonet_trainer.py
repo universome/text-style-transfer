@@ -10,6 +10,7 @@ from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
 from firelab.utils import cudable
+from sklearn.model_selection import train_test_split
 
 from src.models.dissonet import RNNEncoder, RNNDecoder
 from src.models import FFN
@@ -36,7 +37,8 @@ class DissoNetTrainer(BaseTrainer):
         text = Field(init_token='<bos>', eos_token='<eos>', batch_first=True)
         fields = [('modern', text), ('original', text)]
         examples = [Example.fromlist([m,o], fields) for m,o in zip(modern, original)]
-        train_exs, val_exs = examples[100:], examples[:100]
+        train_exs, val_exs = train_test_split(examples, test_size=self.config['val_set_size'],
+                                              random_state=self.config['random_seed'])
 
         self.train_ds, self.val_ds = Dataset(train_exs, fields), Dataset(val_exs, fields)
         text.build_vocab(self.train_ds)
@@ -51,10 +53,10 @@ class DissoNetTrainer(BaseTrainer):
         voc_size = len(self.vocab)
 
         self.encoder = cudable(RNNEncoder(emb_size, hid_size, voc_size))
-        self.merge_nn = cudable(FFN(hid_size * 2, 1, output_size=hid_size, hid_size=hid_size))
+        self.merge_nn = cudable(FFN(hid_size * 2, 1, output_size=hid_size, hid_size=hid_size, dropout=self.config['hp'].get('dropout', 0)))
         self.decoder = cudable(RNNDecoder(emb_size, hid_size, voc_size))
-        self.critic = cudable(FFN(hid_size, 1, hid_size=hid_size))
-        self.motivator = cudable(FFN(hid_size, 1, hid_size=hid_size))
+        self.critic = cudable(FFN(hid_size, 1, hid_size=hid_size, dropout=self.config['hp'].get('dropout', 0)))
+        self.motivator = cudable(FFN(hid_size, 1, hid_size=hid_size, dropout=self.config['hp'].get('dropout', 0)))
 
     def init_criterions(self):
         self.rec_criterion = cross_entropy_without_pads(self.vocab)
@@ -66,7 +68,7 @@ class DissoNetTrainer(BaseTrainer):
 
         self.critic_optim = Adam(self.critic.parameters(), lr=lr)
         self.motivator_optim = Adam(self.motivator.parameters(), lr=lr)
-        self.ae_optim = Adam(chain(self.encoder.parameters(), self.decoder.parameters(), self.merge_nn.parameters()), lr=lr)
+        self.ae_optim = Adam(chain(self.encoder.parameters(), self.decoder.parameters()), lr=lr)
 
     def train_on_batch(self, batch):
         rec_loss, motivator_loss, critic_loss, ae_loss = self.loss_on_batch(batch)
@@ -120,7 +122,8 @@ class DissoNetTrainer(BaseTrainer):
         motivator_loss = motivator_loss_modern + motivator_loss_original
 
         # Loss for encoder and decoder is threefold
-        ae_loss = rec_loss + motivator_loss - critic_loss
+        coefs = self.config.get('loss_coefs')
+        ae_loss = coefs['rec'] * rec_loss + coefs['motivator'] * motivator_loss - coefs['critic'] * critic_loss
 
         return rec_loss, motivator_loss, critic_loss, ae_loss
 
