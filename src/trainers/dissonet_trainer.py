@@ -17,7 +17,7 @@ from src.models import FFN
 from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
-from src.losses.wgan_loss import WGANLoss
+from src.losses.gan_losses import WGANLoss, DiscriminatorLoss
 from src.inference import inference
 
 
@@ -60,7 +60,7 @@ class DissoNetTrainer(BaseTrainer):
 
     def init_criterions(self):
         self.rec_criterion = cross_entropy_without_pads(self.vocab)
-        self.critic_criterion = WGANLoss()
+        self.critic_criterion = DiscriminatorLoss()
         self.motivator_criterion = nn.BCEWithLogitsLoss()
 
     def init_optimizers(self):
@@ -73,7 +73,6 @@ class DissoNetTrainer(BaseTrainer):
     def train_on_batch(self, batch):
         rec_loss, motivator_loss, critic_loss, ae_loss = self.loss_on_batch(batch)
 
-        # Now we can make backward passes
         self.critic_optim.zero_grad()
         critic_loss.backward(retain_graph=True)
         self.critic_optim.step()
