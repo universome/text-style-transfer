@@ -68,7 +68,7 @@ class DissoNetTrainer(BaseTrainer):
 
         self.critic_optim = Adam(self.critic.parameters(), lr=lr)
         self.motivator_optim = Adam(self.motivator.parameters(), lr=lr)
-        self.ae_optim = Adam(chain(self.encoder.parameters(), self.decoder.parameters()), lr=lr)
+        self.ae_optim = Adam(chain(self.encoder.parameters(), self.decoder.parameters(), self.merge_nn.parameters()), lr=lr)
 
     def train_on_batch(self, batch):
         rec_loss, motivator_loss, critic_loss, ae_loss = self.loss_on_batch(batch)
@@ -107,7 +107,7 @@ class DissoNetTrainer(BaseTrainer):
         # Computing reconstruction loss
         rec_loss_modern = self.rec_criterion(recs_modern.view(-1, len(self.vocab)), batch.modern[:, 1:].contiguous().view(-1))
         rec_loss_original = self.rec_criterion(recs_original.view(-1, len(self.vocab)), batch.original[:, 1:].contiguous().view(-1))
-        rec_loss = rec_loss_modern + rec_loss_original
+        rec_loss = (rec_loss_modern + rec_loss_original) / 2
 
         # Computing critic loss
         critic_modern_preds, critic_original_preds = self.critic(content_modern), self.critic(content_original)
@@ -118,7 +118,7 @@ class DissoNetTrainer(BaseTrainer):
         motivator_logits_original = self.motivator(style_original)
         motivator_loss_modern = self.motivator_criterion(motivator_logits_modern, torch.ones_like(motivator_logits_modern))
         motivator_loss_original = self.motivator_criterion(motivator_logits_original, torch.zeros_like(motivator_logits_original))
-        motivator_loss = motivator_loss_modern + motivator_loss_original
+        motivator_loss = (motivator_loss_modern + motivator_loss_original) / 2
 
         # Loss for encoder and decoder is threefold
         coefs = self.config.get('loss_coefs')

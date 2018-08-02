@@ -25,4 +25,4 @@ class DiscriminatorLoss(nn.Module):
         loss_on_real = self.criterion(logits_real, targets_real)
         loss_on_fake = self.criterion(logits_fake, targets_fake)
 
-        return loss_on_real + loss_on_fake
+        return (loss_on_real + loss_on_fake) / 2
