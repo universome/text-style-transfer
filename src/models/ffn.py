@@ -3,35 +3,24 @@ import torch.nn as nn
 
 
 class FFN(nn.Module):
-    def __init__(self, input_size, n_hid_layers, dropout=0, hid_size=None, output_size=1):
+    def __init__(self, sizes, n_hid_layers=0, dropout=0):
         super(FFN, self).__init__()
 
         self.n_hid_layers = n_hid_layers
-        self.input_size = input_size
-        self.hid_size = hid_size or input_size
         self.dropout = dropout
 
-        self.nn = nn.Sequential(
-            nn.Dropout(self.dropout),
-            nn.Linear(self.input_size, self.hid_size),
-            nn.SELU(),
-            nn.BatchNorm1d(self.hid_size),
-            self._init_hidden(),
-            nn.Linear(self.hid_size, output_size)
-        )
+        layers = [self.init_layer(sizes[i], sizes[i+1], (i+2) == len(sizes)) for i in range(len(sizes)-1)]
+        layers = [m for l in layers for m in l] # Flattening each layer into modules
 
-    def _init_hidden(self):
-        layers = []
+        self.nn = nn.Sequential(*layers)
 
-        for _ in range(self.n_hid_layers):
-            layers += [
-                nn.Dropout(self.dropout),
-                nn.Linear(self.hid_size, self.hid_size),
-                nn.SELU(),
-                nn.BatchNorm1d(self.hid_size)
-            ]
+    def init_layer(self, s_in, s_out, is_last_layer=False):
+        layer = [nn.Dropout(self.dropout), nn.Linear(s_in, s_out)]
 
-        return nn.Sequential(*layers)
+        if not is_last_layer:
+            layer.extend([nn.SELU(), nn.BatchNorm1d(s_out)])
+
+        return layer
 
     def forward(self, x):
         return self.nn(x)

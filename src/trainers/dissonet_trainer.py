@@ -25,6 +25,8 @@ class DissoNetTrainer(BaseTrainer):
     def __init__(self, config):
         super(DissoNetTrainer, self).__init__(config)
 
+        self.losses['val_rec_loss'] = [] # Here we'll write history for early stopping
+
     def init_dataloaders(self):
         batch_size = self.config.get('batch_size', 16)
         project_path = self.config['firelab']['project_path']
@@ -41,34 +43,37 @@ class DissoNetTrainer(BaseTrainer):
                                               random_state=self.config['random_seed'])
 
         self.train_ds, self.val_ds = Dataset(train_exs, fields), Dataset(val_exs, fields)
-        text.build_vocab(self.train_ds)
+        text.build_vocab(self.train_ds, max_size=self.config['hp']['max_vocab_size'])
 
         self.vocab = text.vocab
-        self.train_dataloader = data.BucketIterator(self.train_ds, batch_size, repeat=False, shuffle=False)
+        self.train_dataloader = data.BucketIterator(self.train_ds, batch_size, repeat=False)
         self.val_dataloader = data.BucketIterator(self.val_ds, batch_size, repeat=False, shuffle=False)
 
     def init_models(self):
         emb_size = self.config['hp'].get('emb_size')
         hid_size = self.config['hp'].get('hid_size')
         voc_size = len(self.vocab)
+        dropout_p = self.config['hp']['dropout']
 
         self.encoder = cudable(RNNEncoder(emb_size, hid_size, voc_size))
-        self.merge_nn = cudable(FFN(hid_size * 2, 1, output_size=hid_size, hid_size=hid_size, dropout=self.config['hp'].get('dropout', 0)))
         self.decoder = cudable(RNNDecoder(emb_size, hid_size, voc_size))
-        self.critic = cudable(FFN(hid_size, 1, hid_size=hid_size, dropout=self.config['hp'].get('dropout', 0)))
-        self.motivator = cudable(FFN(hid_size, 1, hid_size=hid_size, dropout=self.config['hp'].get('dropout', 0)))
+        self.critic = cudable(FFN([hid_size, 1], dropout=dropout_p))
+        self.motivator = cudable(FFN([hid_size, 1], dropout=dropout_p))
+        self.merge_nn = cudable(nn.Sequential(
+            FFN([hid_size * 2, hid_size], dropout=dropout_p),
+            nn.BatchNorm1d(hid_size)
+        ))
 
     def init_criterions(self):
         self.rec_criterion = cross_entropy_without_pads(self.vocab)
-        self.critic_criterion = DiscriminatorLoss()
+        self.critic_criterion = WGANLoss()
         self.motivator_criterion = nn.BCEWithLogitsLoss()
 
     def init_optimizers(self):
-        lr = self.config['hp'].get('lr', 1e-4)
-
-        self.critic_optim = Adam(self.critic.parameters(), lr=lr)
-        self.motivator_optim = Adam(self.motivator.parameters(), lr=lr)
-        self.ae_optim = Adam(chain(self.encoder.parameters(), self.decoder.parameters(), self.merge_nn.parameters()), lr=lr)
+        self.critic_optim = Adam(self.critic.parameters(), lr=self.config['hp']['lr']['critic'])
+        self.motivator_optim = Adam(self.motivator.parameters(), lr=self.config['hp']['lr']['motivator'])
+        ae_params = chain(self.encoder.parameters(), self.decoder.parameters(), self.merge_nn.parameters())
+        self.ae_optim = Adam(ae_params, lr=self.config['hp']['lr']['ae'])
 
     def train_on_batch(self, batch):
         rec_loss, motivator_loss, critic_loss, ae_loss = self.loss_on_batch(batch)
@@ -140,6 +145,8 @@ class DissoNetTrainer(BaseTrainer):
         self.writer.add_scalar('val_rec_loss', np.mean(rec_losses), self.num_iters_done)
         self.writer.add_scalar('val_motivator_loss', np.mean(motivator_losses), self.num_iters_done)
         self.writer.add_scalar('val_critic_loss', np.mean(critic_losses), self.num_iters_done)
+
+        self.losses['val_rec_loss'].append(np.mean(rec_losses))
 
         # Ok, let's now validate style transfer and auto-encoding
         self.validate_inference()
