@@ -19,10 +19,7 @@ class DiscriminatorLoss(nn.Module):
         self.criterion = nn.BCEWithLogitsLoss()
 
     def forward(self, logits_real, logits_fake):
-        targets_real = torch.zeros_like(logits_real)
-        targets_fake = torch.ones_like(logits_real)
-
-        loss_on_real = self.criterion(logits_real, targets_real)
-        loss_on_fake = self.criterion(logits_fake, targets_fake)
+        loss_on_real = self.criterion(logits_real, torch.zeros_like(logits_real))
+        loss_on_fake = self.criterion(logits_fake, torch.ones_like(logits_fake))
 
         return (loss_on_real + loss_on_fake) / 2

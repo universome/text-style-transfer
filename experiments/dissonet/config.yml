@@ -3,29 +3,29 @@ trainer: "DissoNetTrainer"
 data:
   modern: "data/shakespeare/modern.tok"
   original: "data/shakespeare/original.tok"
-batch_size: 64
+batch_size: 32
 max_num_epochs: 30
-lr: 0.001
 val_freq: 300
 val_set_size: 300
 checkpoint:
   freq_epochs: 1
   modules: [
-    "encoder", "decoder", "merge_nn", "critic", "motivator",
-    "critic_optim", "motivator_optim", "ae_optim"
+    "encoder", "decoder", "merge_nn", "critic",
+    "critic_optim", "ae_optim"
   ]
 random_seed: 42
+early_stopping:
+  loss: "val_rec_loss"
+  history_length: 10
+  should_decrease: true
+loss_coefs:
+  rec: 1
+  critic: 0.0001
 hp:
   emb_size: 1024
   hid_size: 1024
   dropout: 0
-loss_coefs:
-  rec: 1
-  critic: 0
-  motivator: 1
-hpo:
-  emb_size: [512, 1024]
-  hid_size: [512, 1024]
-  use_merge_nn: [true, false]
-  # use_attn: [true, false]
-  n_hid_layers: [0, 1, 2]
+  lr:
+    ae: 0.001
+    critic: 0.01
+  max_vocab_size: 15000

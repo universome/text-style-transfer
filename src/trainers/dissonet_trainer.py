@@ -12,7 +12,7 @@ from firelab import BaseTrainer
 from firelab.utils import cudable
 from sklearn.model_selection import train_test_split
 
-from src.models.dissonet import RNNEncoder, RNNDecoder
+from src.models.dissonet import RNNEncoder, RNNDecoder, MergeNN
 from src.models import FFN
 from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents
@@ -58,52 +58,38 @@ class DissoNetTrainer(BaseTrainer):
         self.encoder = cudable(RNNEncoder(emb_size, hid_size, voc_size))
         self.decoder = cudable(RNNDecoder(emb_size, hid_size, voc_size))
         self.critic = cudable(FFN([hid_size, 1], dropout=dropout_p))
-        self.motivator = cudable(FFN([hid_size, 1], dropout=dropout_p))
-        self.merge_nn = cudable(nn.Sequential(
-            FFN([hid_size * 2, hid_size], dropout=dropout_p),
-            nn.BatchNorm1d(hid_size)
-        ))
+        self.merge_nn = cudable(MergeNN(hid_size))
 
     def init_criterions(self):
         self.rec_criterion = cross_entropy_without_pads(self.vocab)
         self.critic_criterion = WGANLoss()
-        self.motivator_criterion = nn.BCEWithLogitsLoss()
 
     def init_optimizers(self):
         self.critic_optim = Adam(self.critic.parameters(), lr=self.config['hp']['lr']['critic'])
-        self.motivator_optim = Adam(self.motivator.parameters(), lr=self.config['hp']['lr']['motivator'])
         ae_params = chain(self.encoder.parameters(), self.decoder.parameters(), self.merge_nn.parameters())
         self.ae_optim = Adam(ae_params, lr=self.config['hp']['lr']['ae'])
 
     def train_on_batch(self, batch):
-        rec_loss, motivator_loss, critic_loss, ae_loss = self.loss_on_batch(batch)
+        rec_loss, critic_loss, ae_loss = self.loss_on_batch(batch)
 
         self.critic_optim.zero_grad()
         critic_loss.backward(retain_graph=True)
         self.critic_optim.step()
 
         self.ae_optim.zero_grad()
-        self.motivator_optim.zero_grad()
-        motivator_loss.backward(retain_graph=True)
-        self.motivator_optim.step()
-        self.ae_optim.step()
-
-        self.ae_optim.zero_grad()
         ae_loss.backward(retain_graph=True)
         self.ae_optim.step()
 
         self.writer.add_scalar('Rec loss', rec_loss, self.num_iters_done)
-        self.writer.add_scalar('Motivator loss', motivator_loss, self.num_iters_done)
         self.writer.add_scalar('Critic loss', critic_loss, self.num_iters_done)
 
     def loss_on_batch(self, batch):
         # Computing codes we need
-        style_modern, content_modern = self.encoder(batch.modern)
-        style_original, content_original = self.encoder(batch.original)
+        state_modern = self.encoder(batch.modern)
+        state_original = self.encoder(batch.original)
 
-        # Now we should merge back style and content for decoder
-        hid_modern = self.merge_nn(torch.cat([style_modern, content_modern], dim=1))
-        hid_original = self.merge_nn(torch.cat([style_original, content_original], dim=1))
+        hid_modern = self.merge_nn(state_modern, 1)
+        hid_original = self.merge_nn(state_original, 1)
 
         # Reconstructing
         recs_modern = self.decoder(hid_modern, batch.modern[:, :-1])
@@ -115,35 +101,25 @@ class DissoNetTrainer(BaseTrainer):
         rec_loss = (rec_loss_modern + rec_loss_original) / 2
 
         # Computing critic loss
-        critic_modern_preds, critic_original_preds = self.critic(content_modern), self.critic(content_original)
+        critic_modern_preds, critic_original_preds = self.critic(state_modern), self.critic(state_original)
         critic_loss = self.critic_criterion(critic_modern_preds, critic_original_preds)
-
-        # Computing motivator loss
-        motivator_logits_modern = self.motivator(style_modern)
-        motivator_logits_original = self.motivator(style_original)
-        motivator_loss_modern = self.motivator_criterion(motivator_logits_modern, torch.ones_like(motivator_logits_modern))
-        motivator_loss_original = self.motivator_criterion(motivator_logits_original, torch.zeros_like(motivator_logits_original))
-        motivator_loss = (motivator_loss_modern + motivator_loss_original) / 2
 
         # Loss for encoder and decoder is threefold
         coefs = self.config.get('loss_coefs')
-        ae_loss = coefs['rec'] * rec_loss + coefs['motivator'] * motivator_loss - coefs['critic'] * critic_loss
+        ae_loss = coefs['rec'] * rec_loss - coefs['critic'] * critic_loss
 
-        return rec_loss, motivator_loss, critic_loss, ae_loss
+        return rec_loss, critic_loss, ae_loss
 
     def validate(self):
         rec_losses = []
-        motivator_losses = []
         critic_losses = []
 
         for batch in self.val_dataloader:
-            rec_loss, motivator_loss, critic_loss, _ = self.loss_on_batch(batch)
+            rec_loss, critic_loss, _ = self.loss_on_batch(batch)
             rec_losses.append(rec_loss.item())
-            motivator_losses.append(motivator_loss.item())
             critic_losses.append(critic_loss.item())
 
         self.writer.add_scalar('val_rec_loss', np.mean(rec_losses), self.num_iters_done)
-        self.writer.add_scalar('val_motivator_loss', np.mean(motivator_losses), self.num_iters_done)
         self.writer.add_scalar('val_critic_loss', np.mean(critic_losses), self.num_iters_done)
 
         self.losses['val_rec_loss'].append(np.mean(rec_losses))
@@ -207,13 +183,13 @@ class DissoNetTrainer(BaseTrainer):
         return m2o_sents, o2m_sents, m2m_sents, o2o_sents, gm_sents, go_sents
 
     def transfer_style_on_batch(self, batch):
-        style_modern, content_modern = self.encoder(batch.modern)
-        style_original, content_original = self.encoder(batch.original)
+        state_modern = self.encoder(batch.modern)
+        state_original = self.encoder(batch.original)
 
-        modern_to_original_z = self.merge_nn(torch.cat([style_original, content_modern], dim=1))
-        original_to_modern_z = self.merge_nn(torch.cat([style_modern, content_original], dim=1))
-        modern_to_modern_z = self.merge_nn(torch.cat([style_modern, content_modern], dim=1))
-        original_to_original_z = self.merge_nn(torch.cat([style_original, content_original], dim=1))
+        modern_to_original_z = self.merge_nn(state_modern, 0)
+        original_to_modern_z = self.merge_nn(state_original, 1)
+        modern_to_modern_z = self.merge_nn(state_modern, 1)
+        original_to_original_z = self.merge_nn(state_original, 0)
 
         m2o = inference(self.decoder, modern_to_original_z, self.vocab)
         o2m = inference(self.decoder, original_to_modern_z, self.vocab)
