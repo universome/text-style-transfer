@@ -1,12 +1,12 @@
 title: "DissoNet experiments"
 trainer: "DissoNetTrainer"
 data:
-  modern: "data/shakespeare/modern.tok"
-  original: "data/shakespeare/original.tok"
-batch_size: 32
+  domain_x: "data/yelp/yelp-positive-short.tok.bpe"
+  domain_y: "data/yelp/yelp-negative-short.tok.bpe"
+batch_size: 16
 max_num_epochs: 30
-val_freq: 300
-val_set_size: 300
+val_freq: 1000
+val_set_size: 1000
 checkpoint:
   freq_epochs: 1
   modules: [
@@ -16,16 +16,16 @@ checkpoint:
 random_seed: 42
 early_stopping:
   loss: "val_rec_loss"
-  history_length: 10
+  history_length: 20
   should_decrease: true
 loss_coefs:
   rec: 1
-  critic: 0.0001
+  critic: 0.005
 hp:
   emb_size: 1024
   hid_size: 1024
-  dropout: 0
+  dropout: 0.3
+  dropword: 0.3
   lr:
     ae: 0.001
-    critic: 0.01
-  max_vocab_size: 15000
+    critic: 0.001

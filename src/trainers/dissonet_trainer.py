@@ -30,20 +30,20 @@ class DissoNetTrainer(BaseTrainer):
     def init_dataloaders(self):
         batch_size = self.config.get('batch_size', 16)
         project_path = self.config['firelab']['project_path']
-        modern_data_path = os.path.join(project_path, self.config['data']['modern'])
-        original_data_path = os.path.join(project_path, self.config['data']['original'])
+        domain_x_data_path = os.path.join(project_path, self.config['data']['domain_x'])
+        domain_y_data_path = os.path.join(project_path, self.config['data']['domain_y'])
 
-        with open(modern_data_path) as f: modern = f.read().splitlines()
-        with open(original_data_path) as f: original = f.read().splitlines()
+        with open(domain_x_data_path) as f: domain_x = f.read().splitlines()
+        with open(domain_y_data_path) as f: domain_y = f.read().splitlines()
 
         text = Field(init_token='<bos>', eos_token='<eos>', batch_first=True)
-        fields = [('modern', text), ('original', text)]
-        examples = [Example.fromlist([m,o], fields) for m,o in zip(modern, original)]
+        fields = [('domain_x', text), ('domain_y', text)]
+        examples = [Example.fromlist([m,o], fields) for m,o in zip(domain_x, domain_y)]
         train_exs, val_exs = train_test_split(examples, test_size=self.config['val_set_size'],
                                               random_state=self.config['random_seed'])
 
         self.train_ds, self.val_ds = Dataset(train_exs, fields), Dataset(val_exs, fields)
-        text.build_vocab(self.train_ds, max_size=self.config['hp']['max_vocab_size'])
+        text.build_vocab(self.train_ds, max_size=self.config['hp'].get('max_vocab_size'))
 
         self.vocab = text.vocab
         self.train_dataloader = data.BucketIterator(self.train_ds, batch_size, repeat=False)
@@ -54,9 +54,10 @@ class DissoNetTrainer(BaseTrainer):
         hid_size = self.config['hp'].get('hid_size')
         voc_size = len(self.vocab)
         dropout_p = self.config['hp']['dropout']
+        dropword_p = self.config['hp']['dropword']
 
-        self.encoder = cudable(RNNEncoder(emb_size, hid_size, voc_size))
-        self.decoder = cudable(RNNDecoder(emb_size, hid_size, voc_size))
+        self.encoder = cudable(RNNEncoder(emb_size, hid_size, voc_size, dropword_p))
+        self.decoder = cudable(RNNDecoder(emb_size, hid_size, voc_size, dropword_p))
         self.critic = cudable(FFN([hid_size, 1], dropout=dropout_p))
         self.merge_nn = cudable(MergeNN(hid_size))
 
@@ -85,24 +86,24 @@ class DissoNetTrainer(BaseTrainer):
 
     def loss_on_batch(self, batch):
         # Computing codes we need
-        state_modern = self.encoder(batch.modern)
-        state_original = self.encoder(batch.original)
+        state_domain_x = self.encoder(batch.domain_x)
+        state_domain_y = self.encoder(batch.domain_y)
 
-        hid_modern = self.merge_nn(state_modern, 1)
-        hid_original = self.merge_nn(state_original, 1)
+        hid_domain_x = self.merge_nn(state_domain_x, 1)
+        hid_domain_y = self.merge_nn(state_domain_y, 1)
 
         # Reconstructing
-        recs_modern = self.decoder(hid_modern, batch.modern[:, :-1])
-        recs_original = self.decoder(hid_original, batch.original[:, :-1])
+        recs_domain_x = self.decoder(hid_domain_x, batch.domain_x[:, :-1])
+        recs_domain_y = self.decoder(hid_domain_y, batch.domain_y[:, :-1])
 
         # Computing reconstruction loss
-        rec_loss_modern = self.rec_criterion(recs_modern.view(-1, len(self.vocab)), batch.modern[:, 1:].contiguous().view(-1))
-        rec_loss_original = self.rec_criterion(recs_original.view(-1, len(self.vocab)), batch.original[:, 1:].contiguous().view(-1))
-        rec_loss = (rec_loss_modern + rec_loss_original) / 2
+        rec_loss_domain_x = self.rec_criterion(recs_domain_x.view(-1, len(self.vocab)), batch.domain_x[:, 1:].contiguous().view(-1))
+        rec_loss_domain_y = self.rec_criterion(recs_domain_y.view(-1, len(self.vocab)), batch.domain_y[:, 1:].contiguous().view(-1))
+        rec_loss = (rec_loss_domain_x + rec_loss_domain_y) / 2
 
         # Computing critic loss
-        critic_modern_preds, critic_original_preds = self.critic(state_modern), self.critic(state_original)
-        critic_loss = self.critic_criterion(critic_modern_preds, critic_original_preds)
+        critic_domain_x_preds, critic_domain_y_preds = self.critic(state_domain_x), self.critic(state_domain_y)
+        critic_loss = self.critic_criterion(critic_domain_x_preds, critic_domain_y_preds)
 
         # Loss for encoder and decoder is threefold
         coefs = self.config.get('loss_coefs')
@@ -132,20 +133,20 @@ class DissoNetTrainer(BaseTrainer):
         Performs inference on a val dataloader
         (computes predictions without teacher's forcing)
         """
-        m2o, o2m, m2m, o2o, gm, go = self.transfer_style(self.val_dataloader)
+        x2y, y2x, x2x, y2y, gx, gy = self.transfer_style(self.val_dataloader)
 
-        m2o_bleu = compute_bleu_for_sents(m2o, go)
-        o2m_bleu = compute_bleu_for_sents(o2m, gm)
-        m2m_bleu = compute_bleu_for_sents(m2m, gm)
-        o2o_bleu = compute_bleu_for_sents(o2o, go)
+        x2y_bleu = compute_bleu_for_sents(x2y, gx)
+        y2x_bleu = compute_bleu_for_sents(y2x, gy)
+        x2x_bleu = compute_bleu_for_sents(x2x, gx)
+        y2y_bleu = compute_bleu_for_sents(y2y, gy)
 
-        self.writer.add_scalar('m2o val BLEU', m2o_bleu, self.num_iters_done)
-        self.writer.add_scalar('o2m val BLEU', o2m_bleu, self.num_iters_done)
-        self.writer.add_scalar('m2m val BLEU', m2m_bleu, self.num_iters_done)
-        self.writer.add_scalar('o2o val BLEU', o2o_bleu, self.num_iters_done)
+        self.writer.add_scalar('x2y val BLEU', x2y_bleu, self.num_iters_done)
+        self.writer.add_scalar('y2x val BLEU', y2x_bleu, self.num_iters_done)
+        self.writer.add_scalar('x2x val BLEU', x2x_bleu, self.num_iters_done)
+        self.writer.add_scalar('y2y val BLEU', y2y_bleu, self.num_iters_done)
 
         # Ok, let's log generated sequences
-        texts = [get_text_from_sents(*sents) for sents in zip(m2o, o2m, m2m, o2o, gm, go)]
+        texts = [get_text_from_sents(*sents) for sents in zip(x2y, y2x, x2x, y2y, gx, gy)]
         text = '\n===================\n'.join(texts)
 
         self.writer.add_text('Generated examples', text, self.num_iters_done)
@@ -154,59 +155,60 @@ class DissoNetTrainer(BaseTrainer):
         """
         Produces predictions for a given dataloader
         """
-        modern_to_original = []
-        original_to_modern = []
-        modern_to_modern = []
-        original_to_original = []
-        gold_modern = []
-        gold_original = []
+        domain_x_to_domain_y = []
+        domain_y_to_domain_x = []
+        domain_x_to_domain_x = []
+        domain_y_to_domain_y = []
+        gold_domain_x = []
+        gold_domain_y = []
 
         for batch in dataloader:
-            m2o, o2m, m2m, o2o = self.transfer_style_on_batch(batch)
+            x2y, y2x, x2x, y2y = self.transfer_style_on_batch(batch)
 
-            modern_to_original.extend(m2o)
-            original_to_modern.extend(o2m)
-            modern_to_modern.extend(m2m)
-            original_to_original.extend(o2o)
+            domain_x_to_domain_y.extend(x2y)
+            domain_y_to_domain_x.extend(y2x)
+            domain_x_to_domain_x.extend(x2x)
+            domain_y_to_domain_y.extend(y2y)
 
-            gold_modern.extend(batch.modern.detach().cpu().numpy().tolist())
-            gold_original.extend(batch.original.detach().cpu().numpy().tolist())
+            gold_domain_x.extend(batch.domain_x.detach().cpu().numpy().tolist())
+            gold_domain_y.extend(batch.domain_y.detach().cpu().numpy().tolist())
 
         # Converting to sentences
-        m2o_sents = itos_many(modern_to_original, self.vocab)
-        o2m_sents = itos_many(original_to_modern, self.vocab)
-        m2m_sents = itos_many(modern_to_modern, self.vocab)
-        o2o_sents = itos_many(original_to_original, self.vocab)
-        gm_sents = itos_many(gold_modern, self.vocab)
-        go_sents = itos_many(gold_original, self.vocab)
+        x2y_sents = itos_many(domain_x_to_domain_y, self.vocab)
+        y2x_sents = itos_many(domain_y_to_domain_x, self.vocab)
+        x2x_sents = itos_many(domain_x_to_domain_x, self.vocab)
+        y2y_sents = itos_many(domain_y_to_domain_y, self.vocab)
+        gx_sents = itos_many(gold_domain_x, self.vocab)
+        gy_sents = itos_many(gold_domain_y, self.vocab)
 
-        return m2o_sents, o2m_sents, m2m_sents, o2o_sents, gm_sents, go_sents
+        return x2y_sents, y2x_sents, x2x_sents, y2y_sents, gx_sents, gy_sents
 
     def transfer_style_on_batch(self, batch):
-        state_modern = self.encoder(batch.modern)
-        state_original = self.encoder(batch.original)
+        state_domain_x = self.encoder(batch.domain_x)
+        state_domain_y = self.encoder(batch.domain_y)
 
-        modern_to_original_z = self.merge_nn(state_modern, 0)
-        original_to_modern_z = self.merge_nn(state_original, 1)
-        modern_to_modern_z = self.merge_nn(state_modern, 1)
-        original_to_original_z = self.merge_nn(state_original, 0)
+        domain_x_to_domain_y_z = self.merge_nn(state_domain_x, 0)
+        domain_y_to_domain_x_z = self.merge_nn(state_domain_y, 1)
+        domain_x_to_domain_x_z = self.merge_nn(state_domain_x, 1)
+        domain_y_to_domain_y_z = self.merge_nn(state_domain_y, 0)
 
-        m2o = inference(self.decoder, modern_to_original_z, self.vocab)
-        o2m = inference(self.decoder, original_to_modern_z, self.vocab)
-        m2m = inference(self.decoder, modern_to_modern_z, self.vocab)
-        o2o = inference(self.decoder, original_to_original_z, self.vocab)
+        x2y = inference(self.decoder, domain_x_to_domain_y_z, self.vocab)
+        y2x = inference(self.decoder, domain_y_to_domain_x_z, self.vocab)
+        x2x = inference(self.decoder, domain_x_to_domain_x_z, self.vocab)
+        y2y = inference(self.decoder, domain_y_to_domain_y_z, self.vocab)
 
-        return m2o, o2m, m2m, o2o
+        return x2y, y2x, x2x, y2y
 
 
-def get_text_from_sents(m2o_s, o2m_s, m2m_s, o2o_s, gm_s, go_s):
+def get_text_from_sents(x2y_s, y2x_s, x2x_s, y2y_s, gx_s, gy_s):
     # TODO: Move this somewhere from trainer file? Or create some nice template?
     return """
-        Gold modern: [{}]
-        Gold origin: [{}]
+        Gold X: [{}]
+        Gold Y: [{}]
 
-        m2o: [{}]
-        o2m: [{}]
-        m2m: [{}]
-        o2o: [{}]
-    """.format(gm_s, go_s, m2o_s, o2m_s, m2m_s, o2o_s)
+        x2y: [{}]
+        y2x: [{}]
+
+        x2x: [{}]
+        y2y: [{}]
+    """.format(gx_s, gy_s, x2y_s, y2x_s, x2x_s, y2y_s)
