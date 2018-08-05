@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.nn.init as init
 import numpy as np
+from firelab.utils import cudable
 
 __author__ = "Yu-Hsiang Huang"
 
@@ -68,12 +68,11 @@ class MultiHeadAttention(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-        init.xavier_normal(self.w_qs)
-        init.xavier_normal(self.w_ks)
-        init.xavier_normal(self.w_vs)
+        nn.init.xavier_normal(self.w_qs)
+        nn.init.xavier_normal(self.w_ks)
+        nn.init.xavier_normal(self.w_vs)
 
     def forward(self, q, k, v, attn_mask=None):
-        import numpy as np
         assert q.size(0) == k.size(0) == v.size(0) # Batch sizes should be the same
         assert k.size(1) == v.size(1) # We have key <-> value connection
 
@@ -136,7 +135,7 @@ class Linear(nn.Module):
     def __init__(self, d_in, d_out, bias=True):
         super(Linear, self).__init__()
         self.linear = nn.Linear(d_in, d_out, bias=bias)
-        init.xavier_normal(self.linear.weight)
+        nn.init.xavier_normal(self.linear.weight)
 
     def forward(self, x):
         return self.linear(x)
@@ -231,3 +230,18 @@ class ScaledDotProductAttention(nn.Module):
         outputs = torch.bmm(attn, v)
 
         return outputs, attn
+
+
+class Dropword(nn.Module):
+    def __init__(self, p):
+        super(Dropword, self).__init__()
+        self.p = p
+
+    def forward(self, x, p:float=None):
+        assert x.dim() == 3 # (batch, len, emb_size)
+
+        p = p or self.p
+        mask = torch.bernoulli(torch.Tensor(x.size(0), x.size(1)).fill_(1 - p))
+        mask = cudable(mask).unsqueeze(-1).repeat(1, 1, x.size(2))
+
+        return x * mask if self.training else x
