@@ -5,11 +5,12 @@ from itertools import chain
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn.utils import clip_grad_norm_
 from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils import cudable
+from firelab.utils import cudable, grad_norm
 from sklearn.model_selection import train_test_split
 
 from src.models.dissonet import RNNEncoder, RNNDecoder, MergeNN
@@ -28,7 +29,7 @@ class DissoNetTrainer(BaseTrainer):
         self.losses['val_rec_loss'] = [] # Here we'll write history for early stopping
 
     def init_dataloaders(self):
-        batch_size = self.config.batch_size
+        batch_size = self.config.hp.batch_size
         project_path = self.config.firelab.project_path
         domain_x_data_path = os.path.join(project_path, self.config.data.domain_x)
         domain_y_data_path = os.path.join(project_path, self.config.data.domain_y)
@@ -61,28 +62,40 @@ class DissoNetTrainer(BaseTrainer):
         self.critic = cudable(FFN([hid_size, 1], dropout=dropout_p))
         self.merge_nn = cudable(MergeNN(hid_size))
 
+        # Let's save all ae params into single list for future use
+        self.ae_params = list(chain(
+            self.encoder.parameters(),
+            self.decoder.parameters(),
+            self.merge_nn.parameters()
+        ))
+
     def init_criterions(self):
         self.rec_criterion = cross_entropy_without_pads(self.vocab)
         self.critic_criterion = WCriticLoss()
 
     def init_optimizers(self):
         self.critic_optim = Adam(self.critic.parameters(), lr=self.config.hp.lr.critic)
-        ae_params = chain(self.encoder.parameters(), self.decoder.parameters(), self.merge_nn.parameters())
-        self.ae_optim = Adam(ae_params, lr=self.config.hp.lr.ae)
+        self.ae_optim = Adam(self.ae_params, lr=self.config.hp.lr.ae)
 
     def train_on_batch(self, batch):
         rec_loss, critic_loss, ae_loss = self.loss_on_batch(batch)
 
         self.ae_optim.zero_grad()
         ae_loss.backward(retain_graph=True)
+        ae_grad_norm = grad_norm(self.ae_params)
+        clip_grad_norm_(self.ae_params, self.config.hp.grad_clip)
         self.ae_optim.step()
 
         self.critic_optim.zero_grad()
+        critic_grad_norm = grad_norm(self.critic.parameters())
+        clip_grad_norm_(self.critic.parameters(), self.config.hp.grad_clip)
         critic_loss.backward()
         self.critic_optim.step()
 
         self.writer.add_scalar('Rec loss', rec_loss, self.num_iters_done)
         self.writer.add_scalar('Critic loss', critic_loss, self.num_iters_done)
+        self.writer.add_scalar('AE grad norm', ae_grad_norm, self.num_iters_done)
+        self.writer.add_scalar('Critic grad norm', critic_grad_norm, self.num_iters_done)
 
     def loss_on_batch(self, batch):
         # Computing codes we need
@@ -106,7 +119,7 @@ class DissoNetTrainer(BaseTrainer):
         critic_loss = self.critic_criterion(critic_domain_x_preds, critic_domain_y_preds)
 
         # Loss for encoder and decoder is threefold
-        coefs = self.config.loss_coefs
+        coefs = self.config.hp.loss_coefs
         ae_loss = coefs.rec * rec_loss - coefs.critic * critic_loss
 
         return rec_loss, critic_loss, ae_loss
