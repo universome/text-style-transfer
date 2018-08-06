@@ -13,7 +13,7 @@ from firelab import BaseTrainer
 from firelab.utils import cudable, grad_norm
 from sklearn.model_selection import train_test_split
 
-from src.models.dissonet import RNNEncoder, RNNDecoder, MergeNN
+from src.models.dissonet import RNNEncoder, RNNDecoder, MergeNN, DissoNet
 from src.models import FFN
 from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents
@@ -57,10 +57,10 @@ class DissoNetTrainer(BaseTrainer):
         dropout_p = self.config.hp.dropout
         dropword_p = self.config.hp.dropword
 
-        self.encoder = cudable(RNNEncoder(emb_size, hid_size, voc_size, dropword_p))
-        self.decoder = cudable(RNNDecoder(emb_size, hid_size, voc_size, dropword_p))
-        self.critic = cudable(FFN([hid_size, 1], dropout=dropout_p))
-        self.merge_nn = cudable(MergeNN(hid_size))
+        self.encoder = RNNEncoder(emb_size, hid_size, voc_size, dropword_p)
+        self.decoder = RNNDecoder(emb_size, hid_size, voc_size, dropword_p)
+        self.critic = FFN([hid_size, 1], dropout=dropout_p)
+        self.merge_nn = MergeNN(hid_size)
 
         # Let's save all ae params into single list for future use
         self.ae_params = list(chain(
@@ -68,6 +68,12 @@ class DissoNetTrainer(BaseTrainer):
             self.decoder.parameters(),
             self.merge_nn.parameters()
         ))
+
+        self.dissonet = cudable(DissoNet(self.encoder, self.decoder, self.critic, self.merge_nn))
+
+        if torch.cuda.device_count() > 1:
+            print('Going to parallelize on {} GPUs'.format(torch.cuda.device_count()))
+            self.dissonet = nn.DataParallel(self.dissonet)
 
     def init_criterions(self):
         self.rec_criterion = cross_entropy_without_pads(self.vocab)
@@ -98,27 +104,17 @@ class DissoNetTrainer(BaseTrainer):
         self.writer.add_scalar('Critic grad norm', critic_grad_norm, self.num_iters_done)
 
     def loss_on_batch(self, batch):
-        # Computing codes we need
-        state_domain_x = self.encoder(batch.domain_x)
-        state_domain_y = self.encoder(batch.domain_y)
+        recs_x, recs_y, critic_preds_x, critic_preds_y = self.dissonet(batch.domain_x, batch.domain_y)
 
-        hid_domain_x = self.merge_nn(state_domain_x, 1)
-        hid_domain_y = self.merge_nn(state_domain_y, 1)
-
-        # Reconstructing
-        recs_domain_x = self.decoder(hid_domain_x, batch.domain_x[:, :-1])
-        recs_domain_y = self.decoder(hid_domain_y, batch.domain_y[:, :-1])
+        # Critic loss
+        critic_loss = self.critic_criterion(critic_preds_x, critic_preds_y)
 
         # Computing reconstruction loss
-        rec_loss_domain_x = self.rec_criterion(recs_domain_x.view(-1, len(self.vocab)), batch.domain_x[:, 1:].contiguous().view(-1))
-        rec_loss_domain_y = self.rec_criterion(recs_domain_y.view(-1, len(self.vocab)), batch.domain_y[:, 1:].contiguous().view(-1))
+        rec_loss_domain_x = self.rec_criterion(recs_x.view(-1, len(self.vocab)), batch.domain_x[:, 1:].contiguous().view(-1))
+        rec_loss_domain_y = self.rec_criterion(recs_y.view(-1, len(self.vocab)), batch.domain_y[:, 1:].contiguous().view(-1))
         rec_loss = (rec_loss_domain_x + rec_loss_domain_y) / 2
 
-        # Computing critic loss
-        critic_domain_x_preds, critic_domain_y_preds = self.critic(state_domain_x), self.critic(state_domain_y)
-        critic_loss = self.critic_criterion(critic_domain_x_preds, critic_domain_y_preds)
-
-        # Loss for encoder and decoder is threefold
+        # AE loss is twofold
         coefs = self.config.hp.loss_coefs
         ae_loss = coefs.rec * rec_loss - coefs.critic * critic_loss
 
@@ -201,10 +197,10 @@ class DissoNetTrainer(BaseTrainer):
         state_domain_x = self.encoder(batch.domain_x)
         state_domain_y = self.encoder(batch.domain_y)
 
-        domain_x_to_domain_y_z = self.merge_nn(state_domain_x, 0)
-        domain_y_to_domain_x_z = self.merge_nn(state_domain_y, 1)
-        domain_x_to_domain_x_z = self.merge_nn(state_domain_x, 1)
-        domain_y_to_domain_y_z = self.merge_nn(state_domain_y, 0)
+        domain_x_to_domain_y_z = self.merge_nn(state_domain_x, 1)
+        domain_y_to_domain_x_z = self.merge_nn(state_domain_y, 0)
+        domain_x_to_domain_x_z = self.merge_nn(state_domain_x, 0)
+        domain_y_to_domain_y_z = self.merge_nn(state_domain_y, 1)
 
         x2y = inference(self.decoder, domain_x_to_domain_y_z, self.vocab)
         y2x = inference(self.decoder, domain_y_to_domain_x_z, self.vocab)
