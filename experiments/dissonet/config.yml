@@ -3,29 +3,28 @@ trainer: "DissoNetTrainer"
 data:
   domain_x: "data/yelp/yelp-positive-short.tok.bpe"
   domain_y: "data/yelp/yelp-negative-short.tok.bpe"
-batch_size: 16
+batch_size: 64
 max_num_epochs: 30
 val_freq: 1000
 val_set_size: 1000
+modules:
+  models: ["encoder", "decoder", "merge_nn", "critic"]
+  optims: ["critic_optim", "ae_optim"]
 checkpoint:
   freq_epochs: 1
-  modules: [
-    "encoder", "decoder", "merge_nn", "critic",
-    "critic_optim", "ae_optim"
-  ]
 random_seed: 42
 early_stopping:
   loss: "val_rec_loss"
-  history_length: 20
+  history_length: 50
   should_decrease: true
 loss_coefs:
   rec: 1
-  critic: 0.005
+  critic: 0.0005
 hp:
   emb_size: 1024
   hid_size: 1024
-  dropout: 0.3
-  dropword: 0.3
+  dropout: 0.1
+  dropword: 0.1
   lr:
     ae: 0.001
     critic: 0.001

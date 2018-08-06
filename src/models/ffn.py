@@ -3,10 +3,9 @@ import torch.nn as nn
 
 
 class FFN(nn.Module):
-    def __init__(self, sizes, n_hid_layers=0, dropout=0):
+    def __init__(self, sizes, dropout=0):
         super(FFN, self).__init__()
 
-        self.n_hid_layers = n_hid_layers
         self.dropout = dropout
 
         layers = [self.init_layer(sizes[i], sizes[i+1], (i+2) == len(sizes)) for i in range(len(sizes)-1)]

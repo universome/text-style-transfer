@@ -17,7 +17,7 @@ from src.models import FFN
 from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
-from src.losses.gan_losses import WGANLoss, DiscriminatorLoss
+from src.losses.gan_losses import WCriticLoss, DiscriminatorLoss
 from src.inference import inference
 
 
@@ -28,10 +28,10 @@ class DissoNetTrainer(BaseTrainer):
         self.losses['val_rec_loss'] = [] # Here we'll write history for early stopping
 
     def init_dataloaders(self):
-        batch_size = self.config.get('batch_size', 16)
-        project_path = self.config['firelab']['project_path']
-        domain_x_data_path = os.path.join(project_path, self.config['data']['domain_x'])
-        domain_y_data_path = os.path.join(project_path, self.config['data']['domain_y'])
+        batch_size = self.config.batch_size
+        project_path = self.config.firelab.project_path
+        domain_x_data_path = os.path.join(project_path, self.config.data.domain_x)
+        domain_y_data_path = os.path.join(project_path, self.config.data.domain_y)
 
         with open(domain_x_data_path) as f: domain_x = f.read().splitlines()
         with open(domain_y_data_path) as f: domain_y = f.read().splitlines()
@@ -39,22 +39,22 @@ class DissoNetTrainer(BaseTrainer):
         text = Field(init_token='<bos>', eos_token='<eos>', batch_first=True)
         fields = [('domain_x', text), ('domain_y', text)]
         examples = [Example.fromlist([m,o], fields) for m,o in zip(domain_x, domain_y)]
-        train_exs, val_exs = train_test_split(examples, test_size=self.config['val_set_size'],
-                                              random_state=self.config['random_seed'])
+        train_exs, val_exs = train_test_split(examples, test_size=self.config.val_set_size,
+                                              random_state=self.config.random_seed)
 
         self.train_ds, self.val_ds = Dataset(train_exs, fields), Dataset(val_exs, fields)
-        text.build_vocab(self.train_ds, max_size=self.config['hp'].get('max_vocab_size'))
+        text.build_vocab(self.train_ds, max_size=self.config.hp.get('max_vocab_size'))
 
         self.vocab = text.vocab
         self.train_dataloader = data.BucketIterator(self.train_ds, batch_size, repeat=False)
         self.val_dataloader = data.BucketIterator(self.val_ds, batch_size, repeat=False, shuffle=False)
 
     def init_models(self):
-        emb_size = self.config['hp'].get('emb_size')
-        hid_size = self.config['hp'].get('hid_size')
+        emb_size = self.config.hp.emb_size
+        hid_size = self.config.hp.hid_size
         voc_size = len(self.vocab)
-        dropout_p = self.config['hp']['dropout']
-        dropword_p = self.config['hp']['dropword']
+        dropout_p = self.config.hp.dropout
+        dropword_p = self.config.hp.dropword
 
         self.encoder = cudable(RNNEncoder(emb_size, hid_size, voc_size, dropword_p))
         self.decoder = cudable(RNNDecoder(emb_size, hid_size, voc_size, dropword_p))
@@ -63,23 +63,23 @@ class DissoNetTrainer(BaseTrainer):
 
     def init_criterions(self):
         self.rec_criterion = cross_entropy_without_pads(self.vocab)
-        self.critic_criterion = WGANLoss()
+        self.critic_criterion = WCriticLoss()
 
     def init_optimizers(self):
-        self.critic_optim = Adam(self.critic.parameters(), lr=self.config['hp']['lr']['critic'])
+        self.critic_optim = Adam(self.critic.parameters(), lr=self.config.hp.lr.critic)
         ae_params = chain(self.encoder.parameters(), self.decoder.parameters(), self.merge_nn.parameters())
-        self.ae_optim = Adam(ae_params, lr=self.config['hp']['lr']['ae'])
+        self.ae_optim = Adam(ae_params, lr=self.config.hp.lr.ae)
 
     def train_on_batch(self, batch):
         rec_loss, critic_loss, ae_loss = self.loss_on_batch(batch)
 
-        self.critic_optim.zero_grad()
-        critic_loss.backward(retain_graph=True)
-        self.critic_optim.step()
-
         self.ae_optim.zero_grad()
         ae_loss.backward(retain_graph=True)
         self.ae_optim.step()
+
+        self.critic_optim.zero_grad()
+        critic_loss.backward()
+        self.critic_optim.step()
 
         self.writer.add_scalar('Rec loss', rec_loss, self.num_iters_done)
         self.writer.add_scalar('Critic loss', critic_loss, self.num_iters_done)
@@ -106,8 +106,8 @@ class DissoNetTrainer(BaseTrainer):
         critic_loss = self.critic_criterion(critic_domain_x_preds, critic_domain_y_preds)
 
         # Loss for encoder and decoder is threefold
-        coefs = self.config.get('loss_coefs')
-        ae_loss = coefs['rec'] * rec_loss - coefs['critic'] * critic_loss
+        coefs = self.config.loss_coefs
+        ae_loss = coefs.rec * rec_loss - coefs.critic * critic_loss
 
         return rec_loss, critic_loss, ae_loss
 
@@ -147,6 +147,7 @@ class DissoNetTrainer(BaseTrainer):
 
         # Ok, let's log generated sequences
         texts = [get_text_from_sents(*sents) for sents in zip(x2y, y2x, x2x, y2y, gx, gy)]
+        texts = texts[:10] # If we'll write too many texts, nothing will be displayed in TB
         text = '\n===================\n'.join(texts)
 
         self.writer.add_text('Generated examples', text, self.num_iters_done)

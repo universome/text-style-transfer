@@ -2,12 +2,20 @@ import torch
 import torch.nn as nn
 
 
-class WGANLoss(nn.Module):
+class WCriticLoss(nn.Module):
     def __init__(self):
-        super(WGANLoss, self).__init__()
+        super(WCriticLoss, self).__init__()
 
     def forward(self, logits_real, logits_fake):
         return logits_real.mean() - logits_fake.mean()
+
+
+class WGeneratorLoss(nn.Module):
+    def __init__(self):
+        super(WGeneratorLoss, self).__init__()
+
+    def forward(self, logits_fake):
+        return logits_fake.mean()
 
 
 class DiscriminatorLoss(nn.Module):
