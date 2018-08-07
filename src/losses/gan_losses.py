@@ -7,7 +7,7 @@ class WCriticLoss(nn.Module):
         super(WCriticLoss, self).__init__()
 
     def forward(self, logits_real, logits_fake):
-        return logits_real.mean() - logits_fake.mean()
+        return logits_fake.mean() - logits_real.mean()
 
 
 class WGeneratorLoss(nn.Module):
@@ -15,7 +15,7 @@ class WGeneratorLoss(nn.Module):
         super(WGeneratorLoss, self).__init__()
 
     def forward(self, logits_fake):
-        return logits_fake.mean()
+        return -logits_fake.mean()
 
 
 class DiscriminatorLoss(nn.Module):

@@ -21,7 +21,7 @@ hp:
   hid_size: 1024
   dropout: 0.1
   dropword: 0.1
-  batch_size: 64
+  batch_size: 42
   lr:
     ae: 0.001
     critic: 0.001

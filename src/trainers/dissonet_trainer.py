@@ -197,15 +197,15 @@ class DissoNetTrainer(BaseTrainer):
         state_domain_x = self.encoder(batch.domain_x)
         state_domain_y = self.encoder(batch.domain_y)
 
-        domain_x_to_domain_y_z = self.merge_nn(state_domain_x, 1)
-        domain_y_to_domain_x_z = self.merge_nn(state_domain_y, 0)
-        domain_x_to_domain_x_z = self.merge_nn(state_domain_x, 0)
-        domain_y_to_domain_y_z = self.merge_nn(state_domain_y, 1)
+        x2y_z = self.merge_nn(state_domain_x, 1)
+        y2x_z = self.merge_nn(state_domain_y, 0)
+        x2x_z = self.merge_nn(state_domain_x, 0)
+        y2y_z = self.merge_nn(state_domain_y, 1)
 
-        x2y = inference(self.decoder, domain_x_to_domain_y_z, self.vocab)
-        y2x = inference(self.decoder, domain_y_to_domain_x_z, self.vocab)
-        x2x = inference(self.decoder, domain_x_to_domain_x_z, self.vocab)
-        y2y = inference(self.decoder, domain_y_to_domain_y_z, self.vocab)
+        x2y = inference(self.decoder, x2y_z, self.vocab)
+        y2x = inference(self.decoder, y2x_z, self.vocab)
+        x2x = inference(self.decoder, x2x_z, self.vocab)
+        y2y = inference(self.decoder, y2y_z, self.vocab)
 
         return x2y, y2x, x2x, y2y
 
