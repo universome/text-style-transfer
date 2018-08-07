@@ -15,6 +15,7 @@ class RNNEncoder(nn.Module):
     def forward(self, sentence):
         embs = self.embeddings(sentence)
         embs = self.dropword(embs)
+        self.gru.flatten_parameters()
         _, last_hidden_state = self.gru(embs)
         state = last_hidden_state.squeeze(0)
 

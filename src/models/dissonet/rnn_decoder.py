@@ -17,6 +17,7 @@ class RNNDecoder(nn.Module):
     def forward(self, z, sentences):
         embs = self.embeddings(sentences)
         embs = self.dropword(embs)
+        self.gru.flatten_parameters()
         hid_states, _ = self.gru(embs, z.unsqueeze(0))
         logits = self.embs_to_logits(hid_states)
 
