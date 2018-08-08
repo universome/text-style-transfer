@@ -5,11 +5,12 @@ from itertools import chain
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn.utils import clip_grad_norm_
 from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils import cudable
+from firelab.utils import cudable, grad_norm
 from sklearn.model_selection import train_test_split
 
 from src.models.dissonet import RNNEncoder, RNNDecoder, MergeNN
@@ -103,15 +104,22 @@ class CycleGANTrainer(BaseTrainer):
         # First, let's update critics
         self.critic_optim.zero_grad()
         critics_loss.backward(retain_graph=True)
+        critic_grad_norm = grad_norm(self.critics_params)
+        clip_grad_norm_(self.critics_params, self.config.hp.grad_clip)
         self.critic_optim.step()
 
         # Now, let's update everything else
         self.ae_optim.zero_grad()
         ae_total_loss.backward()
+        ae_grad_norm = grad_norm(self.ae_params)
+        clip_grad_norm_(self.ae_params, self.config.hp.grad_clip)
         self.ae_optim.step()
 
         for l in losses_info:
             self.writer.add_scalar(l, losses_info[l], self.num_iters_done)
+
+        self.writer.add_scalar('grad norm/ae', ae_grad_norm, self.num_iters_done)
+        self.writer.add_scalar('grad norm/critic', critic_grad_norm, self.num_iters_done)
 
     def loss_on_batch(self, batch):
         x_hid = self.encoder(batch.domain_x)
