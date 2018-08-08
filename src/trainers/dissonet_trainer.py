@@ -98,10 +98,10 @@ class DissoNetTrainer(BaseTrainer):
         critic_loss.backward()
         self.critic_optim.step()
 
-        self.writer.add_scalar('Rec loss', rec_loss, self.num_iters_done)
-        self.writer.add_scalar('Critic loss', critic_loss, self.num_iters_done)
-        self.writer.add_scalar('AE grad norm', ae_grad_norm, self.num_iters_done)
-        self.writer.add_scalar('Critic grad norm', critic_grad_norm, self.num_iters_done)
+        self.writer.add_scalar('Train/rec', rec_loss, self.num_iters_done)
+        self.writer.add_scalar('Train/critic', critic_loss, self.num_iters_done)
+        self.writer.add_scalar('Grad norm/ae', ae_grad_norm, self.num_iters_done)
+        self.writer.add_scalar('Grad norm/critic', critic_grad_norm, self.num_iters_done)
 
     def loss_on_batch(self, batch):
         recs_x, recs_y, critic_preds_x, critic_preds_y = self.dissonet(batch.domain_x, batch.domain_y)
@@ -115,8 +115,10 @@ class DissoNetTrainer(BaseTrainer):
         rec_loss = (rec_loss_domain_x + rec_loss_domain_y) / 2
 
         # AE loss is twofold
-        coefs = self.config.hp.loss_coefs
-        ae_loss = coefs.rec * rec_loss - coefs.critic * critic_loss
+        critic_frac = self.config.hp.critic_loss_frac
+        critic_coef = abs(critic_frac * rec_loss.item() / critic_loss.item())
+        critic_coef = critic_coef if critic_loss.item() > 0 else 1
+        ae_loss = rec_loss - critic_coef * critic_loss
 
         return rec_loss, critic_loss, ae_loss
 
@@ -129,8 +131,8 @@ class DissoNetTrainer(BaseTrainer):
             rec_losses.append(rec_loss.item())
             critic_losses.append(critic_loss.item())
 
-        self.writer.add_scalar('val_rec_loss', np.mean(rec_losses), self.num_iters_done)
-        self.writer.add_scalar('val_critic_loss', np.mean(critic_losses), self.num_iters_done)
+        self.writer.add_scalar('Val_loss/rec', np.mean(rec_losses), self.num_iters_done)
+        self.writer.add_scalar('Val_loss/critic', np.mean(critic_losses), self.num_iters_done)
 
         self.losses['val_rec_loss'].append(np.mean(rec_losses))
 
@@ -149,10 +151,10 @@ class DissoNetTrainer(BaseTrainer):
         x2x_bleu = compute_bleu_for_sents(x2x, gx)
         y2y_bleu = compute_bleu_for_sents(y2y, gy)
 
-        self.writer.add_scalar('x2y val BLEU', x2y_bleu, self.num_iters_done)
-        self.writer.add_scalar('y2x val BLEU', y2x_bleu, self.num_iters_done)
-        self.writer.add_scalar('x2x val BLEU', x2x_bleu, self.num_iters_done)
-        self.writer.add_scalar('y2y val BLEU', y2y_bleu, self.num_iters_done)
+        self.writer.add_scalar('BLEU/x2y', x2y_bleu, self.num_iters_done)
+        self.writer.add_scalar('BLEU/y2x', y2x_bleu, self.num_iters_done)
+        self.writer.add_scalar('BLEU/x2x', x2x_bleu, self.num_iters_done)
+        self.writer.add_scalar('BLEU/y2y', y2y_bleu, self.num_iters_done)
 
         # Ok, let's log generated sequences
         texts = [get_text_from_sents(*sents) for sents in zip(x2y, y2x, x2x, y2y, gx, gy)]

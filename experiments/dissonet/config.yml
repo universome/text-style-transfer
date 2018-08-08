@@ -25,7 +25,5 @@ hp:
   lr:
     ae: 0.001
     critic: 0.001
-  loss_coefs:
-    rec: 1
-    critic: 0.0005
+  critic_loss_frac: 0.01
   grad_clip: 10
