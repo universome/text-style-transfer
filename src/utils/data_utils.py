@@ -36,16 +36,6 @@ def remove_spec_symbols(ids_seqs):
     return [[t for t in s if not t in spec_symbols] for s in ids_seqs]
 
 
-def pad_to_longest(seqs, volatile=False):
-    ''' Pads the instance to the max seq length in batch '''
-    max_len = max(len(seq) for seq in seqs)
-
-    padded_seqs = np.array([seq + [constants.PAD] * (max_len - len(seq)) for seq in seqs])
-    padded_seqs = variable(torch.LongTensor(padded_seqs), volatile=volatile)
-
-    return padded_seqs
-
-
 def itos_many(seqs, vocab):
     """
     Converts sequences of token ids to normal strings
