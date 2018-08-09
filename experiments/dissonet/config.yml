@@ -1,8 +1,8 @@
 title: "DissoNet experiments"
 trainer: "DissoNetTrainer"
 data:
-  domain_x: "data/yelp/yelp-positive-short.tok.bpe"
-  domain_y: "data/yelp/yelp-negative-short.tok.bpe"
+  domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
+  domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
 max_num_epochs: 30
 val_freq: 500
 val_set_size: 1000
@@ -25,5 +25,5 @@ hp:
   lr:
     ae: 0.001
     critic: 0.001
-  critic_loss_frac: 0.01
+  critic_loss_threshold: -5
   grad_clip: 10

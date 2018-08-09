@@ -1,8 +1,8 @@
 title: "CycleGAN for text style transfer experiments"
 trainer: "CycleGANTrainer"
 data:
-  domain_x: "data/yelp/yelp-positive-short.tok.bpe"
-  domain_y: "data/yelp/yelp-negative-short.tok.bpe"
+  domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
+  domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
 batch_size: 16
 max_num_epochs: 30
 val_freq: 500

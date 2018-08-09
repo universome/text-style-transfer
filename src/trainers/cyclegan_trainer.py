@@ -61,10 +61,7 @@ class CycleGANTrainer(BaseTrainer):
         self.decoder = cudable(RNNDecoder(emb_size, hid_size, voc_size, dropword_p))
 
         def create_gen():
-            return nn.Sequential(
-                FFN([hid_size, hid_size, hid_size], dropout_p),
-                nn.BatchNorm1d(hid_size)
-            )
+            return FFN([hid_size, hid_size, hid_size], dropout_p)
 
         def create_critic():
             return FFN([hid_size, hid_size, 1], dropout_p)

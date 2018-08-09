@@ -59,7 +59,7 @@ class DissoNetTrainer(BaseTrainer):
 
         self.encoder = RNNEncoder(emb_size, hid_size, voc_size, dropword_p)
         self.decoder = RNNDecoder(emb_size, hid_size, voc_size, dropword_p)
-        self.critic = FFN([hid_size, 1], dropout=dropout_p)
+        self.critic = FFN([hid_size, hid_size, 1], dropout=dropout_p)
         self.merge_nn = MergeNN(hid_size)
 
         # Let's save all ae params into single list for future use
@@ -93,9 +93,9 @@ class DissoNetTrainer(BaseTrainer):
         self.ae_optim.step()
 
         self.critic_optim.zero_grad()
+        critic_loss.backward()
         critic_grad_norm = grad_norm(self.critic.parameters())
         clip_grad_norm_(self.critic.parameters(), self.config.hp.grad_clip)
-        critic_loss.backward()
         self.critic_optim.step()
 
         self.writer.add_scalar('Train/rec', rec_loss, self.num_iters_done)
@@ -115,9 +115,7 @@ class DissoNetTrainer(BaseTrainer):
         rec_loss = (rec_loss_domain_x + rec_loss_domain_y) / 2
 
         # AE loss is twofold
-        critic_frac = self.config.hp.critic_loss_frac
-        critic_coef = abs(critic_frac * rec_loss.item() / critic_loss.item())
-        critic_coef = critic_coef if critic_loss.item() > 0 else 1
+        critic_coef = 0 if critic_loss.item() > self.config.hp.critic_loss_threshold else 1
         ae_loss = rec_loss - critic_coef * critic_loss
 
         return rec_loss, critic_loss, ae_loss
