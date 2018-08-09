@@ -26,4 +26,5 @@ hp:
   loss_coefs:
     rec: 1
     gen: 1
+    l2: 0.05
   grad_clip: 10

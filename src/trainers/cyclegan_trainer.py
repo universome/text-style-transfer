@@ -142,9 +142,12 @@ class CycleGANTrainer(BaseTrainer):
         gen_y_loss = self.generator_criterion(critic_x_preds_y2x)
         gen_loss = (gen_x_loss + gen_y_loss) / 2
 
-        # TODO: Add L2 between x_hid and x2y2x_hid?
+        x_hid_l2_loss = torch.norm(x_hid - x2y2x_hid)
+        y_hid_l2_loss = torch.norm(y_hid - y2x2y_hid)
+        l2_loss = (x_hid_l2_loss + y_hid_l2_loss) / 2
+
         coefs = self.config.hp.loss_coefs
-        ae_total_loss = coefs.rec * rec_loss + coefs.gen * gen_loss
+        ae_total_loss = coefs.rec * rec_loss + coefs.gen * gen_loss + coefs.l2 * l2_loss
 
         losses_info = {
             'rec_loss/domain_x': rec_loss_x.item(),
@@ -153,6 +156,8 @@ class CycleGANTrainer(BaseTrainer):
             'critic_loss/domain_y': critic_y_loss.item(),
             'gen_loss/domain_x': gen_x_loss.item(),
             'gen_loss/domain_y': gen_y_loss.item(),
+            'l2_loss/domain_x': x_hid_l2_loss.item(),
+            'l2_loss/domain_y': y_hid_l2_loss.item(),
         }
 
         return ae_total_loss, critics_loss, losses_info
@@ -192,6 +197,7 @@ class CycleGANTrainer(BaseTrainer):
 
         # Ok, let's log generated sequences
         texts = [get_text_from_sents(*sents) for sents in zip(x2y, y2x, x2x, y2y, gx, gy)]
+        texts = texts[:10] # Let's not display all the texts
         text = '\n===================\n'.join(texts)
 
         self.writer.add_text('Generated examples', text, self.num_iters_done)
