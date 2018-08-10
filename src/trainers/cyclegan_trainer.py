@@ -61,7 +61,10 @@ class CycleGANTrainer(BaseTrainer):
         self.decoder = cudable(RNNDecoder(emb_size, hid_size, voc_size, dropword_p))
 
         def create_gen():
-            return FFN([hid_size, hid_size, hid_size], dropout_p)
+            return nn.Sequential(
+                FFN([hid_size, hid_size, hid_size], dropout_p),
+                # nn.Tanh()
+            )
 
         def create_critic():
             return FFN([hid_size, hid_size, 1], dropout_p)
@@ -126,11 +129,17 @@ class CycleGANTrainer(BaseTrainer):
         x2y2x_hid = self.gen_y2x(x2y_hid)
         y2x2y_hid = self.gen_x2y(y2x_hid)
 
-        recs_x = self.decoder(x2y2x_hid, batch.domain_x[:, :-1])
-        recs_y = self.decoder(y2x2y_hid, batch.domain_y[:, :-1])
+        recs_x = self.decoder(x_hid, batch.domain_x[:, :-1])
+        recs_y = self.decoder(y_hid, batch.domain_y[:, :-1])
         rec_loss_x = self.rec_criterion(recs_x.view(-1, len(self.vocab)), batch.domain_x[:, 1:].contiguous().view(-1))
         rec_loss_y = self.rec_criterion(recs_y.view(-1, len(self.vocab)), batch.domain_y[:, 1:].contiguous().view(-1))
         rec_loss = (rec_loss_x + rec_loss_y) / 2
+
+        recs_x2y2x = self.decoder(x2y2x_hid, batch.domain_x[:, :-1])
+        recs_y2x2y = self.decoder(y2x2y_hid, batch.domain_y[:, :-1])
+        rec_loss_x2y2x = self.rec_criterion(recs_x2y2x.view(-1, len(self.vocab)), batch.domain_x[:, 1:].contiguous().view(-1))
+        rec_loss_y2x2y = self.rec_criterion(recs_y2x2y.view(-1, len(self.vocab)), batch.domain_y[:, 1:].contiguous().view(-1))
+        final_rec_loss = (rec_loss_x2y2x + rec_loss_y2x2y) / 2
 
         critic_x_preds_x, critic_x_preds_y2x = self.critic_x(x_hid), self.critic_x(y2x_hid)
         critic_y_preds_y, critic_y_preds_x2y = self.critic_y(y_hid), self.critic_y(x2y_hid)
@@ -147,11 +156,13 @@ class CycleGANTrainer(BaseTrainer):
         l2_loss = (x_hid_l2_loss + y_hid_l2_loss) / 2
 
         coefs = self.config.hp.loss_coefs
-        ae_total_loss = coefs.rec * rec_loss + coefs.gen * gen_loss + coefs.l2 * l2_loss
+        ae_total_loss = rec_loss + coefs.final_rec * final_rec_loss + coefs.gen * gen_loss + coefs.l2 * l2_loss
 
         losses_info = {
             'rec_loss/domain_x': rec_loss_x.item(),
             'rec_loss/domain_y': rec_loss_y.item(),
+            'final_rec_loss/domain_x': rec_loss_x2y2x.item(),
+            'final_rec_loss/domain_y': rec_loss_y2x2y.item(),
             'critic_loss/domain_x': critic_x_loss.item(),
             'critic_loss/domain_y': critic_y_loss.item(),
             'gen_loss/domain_x': gen_x_loss.item(),
