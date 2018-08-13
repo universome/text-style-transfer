@@ -10,7 +10,7 @@ from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils import cudable, grad_norm
+from firelab.utils import cudable, grad_norm, HPLinearScheme
 from sklearn.model_selection import train_test_split
 
 from src.models.dissonet import RNNEncoder, RNNDecoder, MergeNN
@@ -86,8 +86,11 @@ class CycleGANTrainer(BaseTrainer):
         self.ae_params = list(chain(
             self.encoder.parameters(),
             self.decoder.parameters(),
+        ))
+
+        self.gen_params = list(chain(
             self.gen_x2y.parameters(),
-            self.gen_y2x.parameters()
+            self.gen_y2x.parameters(),
         ))
 
         self.critics_params = list(chain(
@@ -96,21 +99,29 @@ class CycleGANTrainer(BaseTrainer):
         ))
 
         self.ae_optim = Adam(self.ae_params, lr=self.config.hp.lr)
+        self.gen_optim = Adam(self.gen_params, lr=self.config.hp.lr)
         self.critic_optim = Adam(self.critics_params, lr=self.config.hp.lr)
 
     def train_on_batch(self, batch):
-        ae_total_loss, critics_loss, losses_info = self.loss_on_batch(batch)
+        rec_loss, critics_loss, gens_loss, losses_info = self.loss_on_batch(batch)
 
-        # First, let's update critics
+        # Critics
         self.critic_optim.zero_grad()
         critics_loss.backward(retain_graph=True)
         critic_grad_norm = grad_norm(self.critics_params)
         clip_grad_norm_(self.critics_params, self.config.hp.grad_clip)
         self.critic_optim.step()
 
-        # Now, let's update everything else
+        # Generators
+        self.gen_optim.zero_grad()
+        gens_loss.backward(retain_graph=True)
+        gen_grad_norm = grad_norm(self.gen_params)
+        clip_grad_norm_(self.gen_params, self.config.hp.grad_clip)
+        self.gen_optim.step()
+
+        # AE
         self.ae_optim.zero_grad()
-        ae_total_loss.backward()
+        rec_loss.backward()
         ae_grad_norm = grad_norm(self.ae_params)
         clip_grad_norm_(self.ae_params, self.config.hp.grad_clip)
         self.ae_optim.step()
@@ -120,6 +131,7 @@ class CycleGANTrainer(BaseTrainer):
 
         self.writer.add_scalar('grad norm/ae', ae_grad_norm, self.num_iters_done)
         self.writer.add_scalar('grad norm/critic', critic_grad_norm, self.num_iters_done)
+        self.writer.add_scalar('grad norm/gen', gen_grad_norm, self.num_iters_done)
 
     def loss_on_batch(self, batch):
         x_hid = self.encoder(batch.domain_x)
@@ -129,24 +141,21 @@ class CycleGANTrainer(BaseTrainer):
         x2y2x_hid = self.gen_y2x(x2y_hid)
         y2x2y_hid = self.gen_x2y(y2x_hid)
 
+        # Reconstruction loss
         recs_x = self.decoder(x_hid, batch.domain_x[:, :-1])
         recs_y = self.decoder(y_hid, batch.domain_y[:, :-1])
         rec_loss_x = self.rec_criterion(recs_x.view(-1, len(self.vocab)), batch.domain_x[:, 1:].contiguous().view(-1))
         rec_loss_y = self.rec_criterion(recs_y.view(-1, len(self.vocab)), batch.domain_y[:, 1:].contiguous().view(-1))
         rec_loss = (rec_loss_x + rec_loss_y) / 2
 
-        recs_x2y2x = self.decoder(x2y2x_hid, batch.domain_x[:, :-1])
-        recs_y2x2y = self.decoder(y2x2y_hid, batch.domain_y[:, :-1])
-        rec_loss_x2y2x = self.rec_criterion(recs_x2y2x.view(-1, len(self.vocab)), batch.domain_x[:, 1:].contiguous().view(-1))
-        rec_loss_y2x2y = self.rec_criterion(recs_y2x2y.view(-1, len(self.vocab)), batch.domain_y[:, 1:].contiguous().view(-1))
-        final_rec_loss = (rec_loss_x2y2x + rec_loss_y2x2y) / 2
-
+        # Critic loss
         critic_x_preds_x, critic_x_preds_y2x = self.critic_x(x_hid), self.critic_x(y2x_hid)
         critic_y_preds_y, critic_y_preds_x2y = self.critic_y(y_hid), self.critic_y(x2y_hid)
         critic_x_loss = self.critic_criterion(critic_x_preds_x, critic_x_preds_y2x)
         critic_y_loss = self.critic_criterion(critic_y_preds_y, critic_y_preds_x2y)
         critics_loss = (critic_x_loss + critic_y_loss) / 2
 
+        # Generator loss (consists of making critic's life harder and l2 loss)
         gen_x_loss = self.generator_criterion(critic_y_preds_x2y)
         gen_y_loss = self.generator_criterion(critic_x_preds_y2x)
         gen_loss = (gen_x_loss + gen_y_loss) / 2
@@ -155,14 +164,13 @@ class CycleGANTrainer(BaseTrainer):
         y_hid_l2_loss = torch.norm(y_hid - y2x2y_hid)
         l2_loss = (x_hid_l2_loss + y_hid_l2_loss) / 2
 
-        coefs = self.config.hp.loss_coefs
-        ae_total_loss = rec_loss + coefs.final_rec * final_rec_loss + coefs.gen * gen_loss + coefs.l2 * l2_loss
+        # Computing coefs
+        c_l2 = HPLinearScheme(*self.config.hp.loss_coefs.l2).evaluate(self.num_iters_done)
+        gens_loss = gen_loss + c_l2 * l2_loss
 
         losses_info = {
             'rec_loss/domain_x': rec_loss_x.item(),
             'rec_loss/domain_y': rec_loss_y.item(),
-            'final_rec_loss/domain_x': rec_loss_x2y2x.item(),
-            'final_rec_loss/domain_y': rec_loss_y2x2y.item(),
             'critic_loss/domain_x': critic_x_loss.item(),
             'critic_loss/domain_y': critic_y_loss.item(),
             'gen_loss/domain_x': gen_x_loss.item(),
@@ -171,13 +179,13 @@ class CycleGANTrainer(BaseTrainer):
             'l2_loss/domain_y': y_hid_l2_loss.item(),
         }
 
-        return ae_total_loss, critics_loss, losses_info
+        return rec_loss, critics_loss, gens_loss, losses_info
 
     def validate(self):
         losses = []
 
         for batch in self.val_dataloader:
-            _, _, losses_info = self.loss_on_batch(batch)
+            *_, losses_info = self.loss_on_batch(batch)
             losses.append(losses_info)
 
         l_names = losses[0].keys()

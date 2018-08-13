@@ -24,7 +24,6 @@ hp:
   dropword: 0.1
   lr: 0.001
   loss_coefs:
-    final_rec: 0.5
-    gen: 0.5
-    l2: 0.05
+    l2: [0., 0.05, 10000.]
   grad_clip: 10
+  n_critic: 5
