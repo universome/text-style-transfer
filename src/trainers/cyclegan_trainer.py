@@ -83,20 +83,9 @@ class CycleGANTrainer(BaseTrainer):
         self.generator_criterion = WGeneratorLoss()
 
     def init_optimizers(self):
-        self.ae_params = list(chain(
-            self.encoder.parameters(),
-            self.decoder.parameters(),
-        ))
-
-        self.gen_params = list(chain(
-            self.gen_x2y.parameters(),
-            self.gen_y2x.parameters(),
-        ))
-
-        self.critics_params = list(chain(
-            self.critic_x.parameters(),
-            self.critic_y.parameters()
-        ))
+        self.ae_params = list(chain(self.encoder.parameters(), self.decoder.parameters()))
+        self.gen_params = list(chain(self.gen_x2y.parameters(), self.gen_y2x.parameters()))
+        self.critics_params = list(chain(self.critic_x.parameters(), self.critic_y.parameters()))
 
         self.ae_optim = Adam(self.ae_params, lr=self.config.hp.lr)
         self.gen_optim = Adam(self.gen_params, lr=self.config.hp.lr)

@@ -1,0 +1,29 @@
+title: "Machine translation with Transformer"
+trainer: "TransformerMTTrainer"
+data:
+  train: "data/multi30k/train"
+  val: "data/multi30k/val"
+max_num_epochs: 30
+val_freq_epochs: 1
+modules:
+  models: ["transformer"]
+  optims: ["optim"]
+checkpoint:
+  freq_epochs: 1
+random_seed: 42
+early_stopping:
+  loss: "val_bleu"
+  history_length: 50
+  should_decrease: false
+hp:
+  lr: 0.01
+  batch_size: 32
+  grad_clip: 10
+  transformer:
+    d_model: 512
+    dropout: 0.1
+    n_enc_layers: 6
+    n_dec_layers: 6
+    max_len: 100
+    n_heads: 4
+    d_ff: 2048

@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from firelab.utils import cudable
 
-def inference(model, z, vocab, max_len=100):
+def inference(model, z, vocab, *model_args, max_len=100):
     """
     All decoder models have the same inference procedure
     Let's move it into the common function
@@ -15,7 +15,8 @@ def inference(model, z, vocab, max_len=100):
     n_finished = 0
 
     for _ in range(max_len):
-        next_tokens = model.forward(z, active_seqs).max(dim=-1)[1][:,-1] # TODO: use beam search
+        # TODO: use beam search
+        next_tokens = model.forward(z, active_seqs, *model_args).max(dim=-1)[1][:,-1]
         active_seqs = torch.cat((active_seqs, next_tokens.unsqueeze(1)), dim=-1)
         finished_mask = (next_tokens == EOS).cpu().numpy().astype(bool)
         finished_seqs_idx = active_seqs_idx[finished_mask]
