@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from .layers import MultiHeadAttention, SublayerConnection, PositionalEncoding, FeedForward, LayerNorm
+from .layers import MultiHeadAttention, SublayerConnection, PositionalEncoding, FeedForward
 from .utils import pad_mask, subsequent_mask
 
 
@@ -19,7 +19,7 @@ class Decoder(nn.Module):
             DecoderLayer(config) for _ in range(config.n_dec_layers)
         ])
         self.linear_out = nn.Linear(config.d_model, len(vocab_trg))
-        self.norm = LayerNorm(config.d_model)
+        self.norm = nn.LayerNorm(config.d_model)
 
     def forward(self, encs, trg, encs_mask):
         mask = pad_mask(trg, self.vocab_trg).unsqueeze(1) & subsequent_mask(trg.size(1))
@@ -31,7 +31,7 @@ class Decoder(nn.Module):
             out = layer(encs, out, encs_mask, mask)
 
         out = self.norm(out)
-        out = nn.functional.log_softmax(self.linear_out(out))
+        out = self.linear_out(out)
 
         return out
 

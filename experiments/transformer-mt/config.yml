@@ -5,7 +5,6 @@ data:
   val: "data/multi30k/val"
 max_num_epochs: 300
 val_freq_epochs: 1
-# val_freq_iters: 5
 modules:
   models: ["transformer"]
   optims: ["optim"]

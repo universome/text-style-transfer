@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from .layers import MultiHeadAttention, SublayerConnection, PositionalEncoding, FeedForward, LayerNorm
+from .layers import MultiHeadAttention, SublayerConnection, PositionalEncoding, FeedForward
 from .utils import pad_mask
 
 
@@ -18,7 +18,7 @@ class Encoder(nn.Module):
             EncoderLayer(config) for _ in range(config.n_enc_layers)
         ])
         self.dropout = nn.Dropout(config.dropout)
-        self.norm = LayerNorm(config.d_model)
+        self.norm = nn.LayerNorm(config.d_model)
 
     def forward(self, x):
         mask = pad_mask(x, self.vocab_src).unsqueeze(1)
