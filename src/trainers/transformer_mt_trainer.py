@@ -74,8 +74,7 @@ class TransformerMTTrainer(BaseTrainer):
             Generator(config.d_model, len(self.vocab_trg))))
 
     def init_criterions(self):
-        # self.criterion = cross_entropy_without_pads(self.vocab_trg)
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = cross_entropy_without_pads(self.vocab_trg)
 
     def init_optimizers(self):
         self.optim = Adam(self.transformer.parameters(), lr=self.config.hp.lr)
@@ -113,35 +112,35 @@ class TransformerMTTrainer(BaseTrainer):
             src_mask = pad_mask(batch.src, self.vocab_src).unsqueeze(1)
             encs = self.transformer.encode(batch.src, src_mask)
             preds = inference(self.transformer, encs, self.vocab_trg, src_mask)
-            sources = itos_many(batch.src, self.vocab_src)
             preds = itos_many(preds, self.vocab_trg)
             gold = itos_many(batch.trg, self.vocab_trg)
             bleu = compute_bleu_for_sents(preds, gold)
             bleus.append(bleu)
+
             break
 
         self.writer.add_scalar('val/rec_loss', np.mean(rec_losses), self.num_iters_done)
         self.writer.add_scalar('val/bleu', np.mean(bleus), self.num_iters_done)
         self.losses['val_bleu'].append(np.mean(bleus))
 
-        texts = ['Source: {} \n\n Translation: {}\n\n Gold: {}'.format(s,t,g) for s,t,g in zip(sources, preds, gold)]
+        texts = ['Translation: {}\n\n Gold: {}'.format(t,g) for t,g in zip(preds, gold)]
         text = '\n\n ================== \n\n'.join(texts[:10])
         self.writer.add_text('Samples', text, self.num_iters_done)
 
 
-def inference(model, z, vocab, enc_mask=None, max_len=50):
+def inference(model, encs, vocab, enc_mask=None, max_len=50):
     """
     All decoder models have the same inference procedure
     Let's move it into the common function
     """
     BOS, EOS = vocab.stoi['<bos>'], vocab.stoi['<eos>']
-    translations = cudable(torch.tensor([[BOS] for _ in range(z.size(0))])).long()
+    translations = cudable(torch.tensor([[BOS] for _ in range(encs.size(0))])).long()
 
     for _ in range(max_len-1):
-        trg_mask = (translations != vocab.stoi['<pad>']).unsqueeze(1) & subsequent_mask(translations.size(1))
-        decs = model.decode(z, enc_mask, translations, trg_mask)
-        next_tokens_dists = model.generator(decs)
-        next_tokens = next_tokens_dists.max(dim=-1)[1][:,-1]
+        trg_mask = pad_mask(translations, vocab).unsqueeze(1) & subsequent_mask(translations.size(1))
+        decs = model.decode(encs, enc_mask, translations, trg_mask)
+        next_tokens_dists = model.generator(decs[:,-1])
+        next_tokens = next_tokens_dists.max(dim=-1)[1]
         translations = torch.cat((translations, next_tokens.unsqueeze(1)), dim=1)
 
     # Removing everything after EOS token

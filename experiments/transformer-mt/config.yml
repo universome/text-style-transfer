@@ -1,7 +1,7 @@
 title: "Machine translation with Transformer"
 trainer: "TransformerMTTrainer"
 data:
-  train: "data/multi30k/train-head"
+  train: "data/multi30k/train"
   val: "data/multi30k/val"
 max_num_epochs: 300
 val_freq_epochs: 1
