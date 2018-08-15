@@ -79,7 +79,6 @@ class TransformerMTTrainer(BaseTrainer):
     def validate(self):
         rec_losses = []
         bleus = []
-        self.train_mode()
 
         for batch in self.val_dataloader:
             # CE loss
@@ -88,7 +87,7 @@ class TransformerMTTrainer(BaseTrainer):
 
             # BLEU
             encs, enc_mask = self.transformer.encoder(batch.src)
-            preds = inference(self.transformer.decoder, encs, self.vocab_trg, enc_mask)
+            preds = inference(self.transformer.decoder, encs, self.vocab_trg, enc_mask, self.config.hp.transformer.max_len)
             preds = itos_many(preds, self.vocab_trg)
             gold = itos_many(batch.trg, self.vocab_trg)
             bleu = compute_bleu_for_sents(preds, gold)
