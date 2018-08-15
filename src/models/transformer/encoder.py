@@ -20,9 +20,11 @@ class Encoder(nn.Module):
         self.dropout = nn.Dropout(config.dropout)
         self.norm = nn.LayerNorm(config.d_model)
 
-    def forward(self, x):
-        mask = pad_mask(x, self.vocab_src).unsqueeze(1)
-        x = self.embed(x) * np.sqrt(self.config.d_model)
+    def forward(self, x, mask=None, onehot=True):
+        mask = mask if not mask is None else pad_mask(x, self.vocab_src).unsqueeze(1)
+
+        x = self.embed(x) if onehot else torch.matmul(x, self.embed.weight)
+        x = x * np.sqrt(self.config.d_model)
         x = self.pe(x)
 
         for layer in self.layers:
