@@ -5,7 +5,7 @@ data:
   domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
 batch_size: 16
 max_num_epochs: 30
-val_freq: 500
+val_freq_iters: 500
 val_set_size: 500
 modules:
   models: ["encoder", "decoder", "critic_x", "critic_y", "gen_x2y", "gen_y2x"]

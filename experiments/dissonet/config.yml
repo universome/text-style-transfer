@@ -4,7 +4,7 @@ data:
   domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
   domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
 max_num_epochs: 30
-val_freq: 500
+val_freq_iters: 500
 val_set_size: 1000
 modules:
   models: ["encoder", "decoder", "merge_nn", "critic"]

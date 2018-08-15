@@ -2,7 +2,8 @@ import torch
 import numpy as np
 from firelab.utils import cudable
 
-def inference(model, z, vocab, *model_args, max_len=100):
+
+def inference(model, z, vocab, enc_mask=None, max_len=100):
     """
     All decoder models have the same inference procedure
     Let's move it into the common function
@@ -16,7 +17,13 @@ def inference(model, z, vocab, *model_args, max_len=100):
 
     for _ in range(max_len):
         # TODO: use beam search
-        next_tokens = model.forward(z, active_seqs, *model_args).max(dim=-1)[1][:,-1]
+        # TODO: this code looks awful.
+        if enc_mask is None:
+            next_tokens_dists = model.forward(z, active_seqs)
+        else:
+            next_tokens_dists = model.forward(z, active_seqs, enc_mask)
+
+        next_tokens = next_tokens_dists.max(dim=-1)[1][:,-1]
         active_seqs = torch.cat((active_seqs, next_tokens.unsqueeze(1)), dim=-1)
         finished_mask = (next_tokens == EOS).cpu().numpy().astype(bool)
         finished_seqs_idx = active_seqs_idx[finished_mask]
@@ -31,6 +38,8 @@ def inference(model, z, vocab, *model_args, max_len=100):
 
             active_seqs = active_seqs[next_tokens != EOS]
             z = z[next_tokens != EOS]
+            if not enc_mask is None:
+                enc_mask = enc_mask[next_tokens != EOS]
 
         if n_finished == batch_size: break
 
