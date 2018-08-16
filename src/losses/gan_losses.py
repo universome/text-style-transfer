@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.autograd as autograd
+import numpy as np
 from firelab.utils import cudable
 
 
@@ -38,7 +39,13 @@ def wgan_gp(critic, real_data, fake_data, *critic_args, **critic_kwargs):
     "Computes gradient penalty according to WGAN-GP paper"
     assert real_data.size() == fake_data.size()
 
-    eps = cudable(torch.rand(real_data.size(0), 1, 1))
+    batch_size, ndim = real_data.size(0), real_data.dim()
+
+    if ndim == 1:
+        eps = cudable(torch.rand(batch_size))
+    else:
+        eps = cudable(torch.rand(batch_size, *np.ones(ndim - 1).astype(int)))
+
     eps = eps.expand(real_data.size())
 
     interpolations = eps * real_data + (1 - eps) * fake_data

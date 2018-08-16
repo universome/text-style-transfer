@@ -17,7 +17,7 @@ from src.models.dissonet import RNNEncoder, RNNDecoder, MergeNN
 from src.models import FFN
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
-from src.losses.gan_losses import WCriticLoss, WGeneratorLoss
+from src.losses.gan_losses import WCriticLoss, WGeneratorLoss, wgan_gp
 from src.inference import inference
 from src.utils.style_transfer import transfer_style, get_text_from_sents
 
@@ -129,7 +129,8 @@ class CycleGANTrainer(BaseTrainer):
 
         losses_info['grad norm/ae'] = ae_grad_norm.item()
         losses_info['grad norm/gen'] = gen_grad_norm.item()
-        self.write_losses(losses_info)
+
+        self.write_losses({('TRAIN/' + k): losses_info[k] for k in losses_info})
 
     def critic_loss_on_batch(self, batch):
         x_hid = self.encoder(batch.domain_x)
@@ -142,14 +143,20 @@ class CycleGANTrainer(BaseTrainer):
         critic_y_preds_y, critic_y_preds_x2y = self.critic_y(y_hid), self.critic_y(x2y_hid)
         critic_x_loss = self.critic_criterion(critic_x_preds_x, critic_x_preds_y2x)
         critic_y_loss = self.critic_criterion(critic_y_preds_y, critic_y_preds_x2y)
-        critics_loss = (critic_x_loss + critic_y_loss) / 2
+        critic_x_gp = wgan_gp(self.critic_x, x_hid, y2x_hid)
+        critic_y_gp = wgan_gp(self.critic_y, y_hid, x2y_hid)
+        critic_x_total_loss = critic_x_loss + self.config.hp.gp_lambda * critic_x_gp
+        critic_y_total_loss = critic_y_loss + self.config.hp.gp_lambda * critic_y_gp
+        critics_total_loss = (critic_x_total_loss + critic_y_total_loss) / 2
 
         losses_info = {
             'critic_loss/domain_x': critic_x_loss.item(),
             'critic_loss/domain_y': critic_y_loss.item(),
+            'critic_loss/gp_x': critic_x_gp.item(),
+            'critic_loss/gp_y': critic_y_gp.item(),
         }
 
-        return critics_loss, losses_info
+        return critics_total_loss, losses_info
 
     def gen_loss_on_batch(self, batch):
         x_hid = self.encoder(batch.domain_x)
@@ -196,8 +203,9 @@ class CycleGANTrainer(BaseTrainer):
         losses = []
 
         for batch in self.val_dataloader:
-            *_, critic_losses_info = self.critic_loss_on_batch(batch)
             *_, gen_losses_info = self.gen_loss_on_batch(batch)
+            with torch.enable_grad():
+                *_, critic_losses_info = self.critic_loss_on_batch(batch)
             losses_info = dict(list(critic_losses_info.items()) + list(gen_losses_info.items()))
             losses.append(losses_info)
 
