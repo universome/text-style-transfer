@@ -10,7 +10,7 @@ from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils import cudable, grad_norm, determine_turn
+from firelab.utils import cudable, grad_norm, determine_turn, HPLinearScheme
 from sklearn.model_selection import train_test_split
 
 from src.models.transformer.utils import pad_mask
@@ -63,6 +63,7 @@ class WordReplacerTrainer(BaseTrainer):
             self.generator_x2y[0].embed.weight = self.critic_y.encoder.embed.weight
 
     def init_criterions(self):
+        self.rec_crit = nn.CrossEntropyLoss() # Try label smoothing!
         self.gen_criterion = WGeneratorLoss()
         self.critic_criterion = WCriticLoss()
 
@@ -71,7 +72,7 @@ class WordReplacerTrainer(BaseTrainer):
         self.optim_critic = Adam(self.critic_y.parameters(), lr=self.config.hp.lr)
 
     def train_on_batch(self, batch):
-        gen_loss, critic_loss, bleu, *_ = self.loss_on_batch(batch)
+        gen_total_loss, critic_loss, losses_info, *_ = self.loss_on_batch(batch)
 
         if determine_turn(self.num_iters_done, [self.config.hp.n_critic, 1]) == 0:
             self.optim_critic.zero_grad()
@@ -79,22 +80,26 @@ class WordReplacerTrainer(BaseTrainer):
             self.optim_critic.step()
         else:
             self.optim_gen.zero_grad()
-            gen_loss.backward()
+            gen_total_loss.backward()
             self.optim_gen.step()
 
-        self.writer.add_scalar('Train/critic_loss', critic_loss.item(), self.num_iters_done)
-        self.writer.add_scalar('Train/gen_loss', gen_loss.item(), self.num_iters_done)
-        self.writer.add_scalar('Train/bleu', bleu, self.num_iters_done)
+        self.write_losses(losses_info)
 
     def loss_on_batch(self, batch):
         embs, _ = self.generator_x2y[0](batch.domain_x)
         logits = self.generator_x2y[1](embs)
+        probs = self.generator_x2y[2](logits)
         enc_mask = pad_mask(batch.domain_x, self.vocab).unsqueeze(1)
 
         preds_on_fake = self.critic_y(logits, enc_mask, onehot=False)
         preds_on_real = self.critic_y(batch.domain_y)
 
+        rec_loss = self.rec_crit(logits.view(-1, len(self.vocab)), batch.domain_x.contiguous().view(-1))
         gen_loss = self.gen_criterion(preds_on_fake)
+        rec_loss_coef = HPLinearScheme(*self.config.hp.loss_coefs.rec).evaluate(self.num_iters_done)
+        gen_loss_coef = HPLinearScheme(*self.config.hp.loss_coefs.gen).evaluate(self.num_iters_done)
+        gen_total_loss = rec_loss_coef * rec_loss + gen_loss_coef * gen_loss
+
         critic_loss = self.critic_criterion(preds_on_real, preds_on_fake)
 
         tokens = logits.max(dim=2)[1]
@@ -103,26 +108,29 @@ class WordReplacerTrainer(BaseTrainer):
         x2y = itos_many(tokens, self.vocab)
         bleu = compute_bleu_for_sents(x2y, x)
 
-        return gen_loss, critic_loss, bleu, x, x2y
+        losses_info = {
+            'rec_loss': rec_loss.item(),
+            'gen_loss': gen_loss.item(),
+            'critic_loss': critic_loss.item(),
+            'bleu': bleu
+        }
+
+        return gen_total_loss, critic_loss, losses_info, x, x2y
 
     def validate(self):
-        gen_losses = []
-        critic_losses = []
-        bleus = []
+        losses = []
         x_all = []
         x2y_all = []
 
         for batch in self.val_dataloader:
-            gen_loss, critic_loss, bleu, x, x2y = self.loss_on_batch(batch)
-            gen_losses.append(gen_loss.item())
-            critic_losses.append(critic_loss.item())
-            bleus.append(bleu)
+            _, _, losses_info, x, x2y = self.loss_on_batch(batch)
+            losses.append(losses_info)
             x_all.extend(x)
             x2y_all.extend(x2y)
 
-        self.writer.add_scalar('VAL/gen', np.mean(gen_losses), self.num_iters_done)
-        self.writer.add_scalar('VAL/critic', np.mean(critic_losses), self.num_iters_done)
-        self.writer.add_scalar('VAL/bleu', np.mean(bleus), self.num_iters_done)
+        for l in losses[0].keys():
+            value = np.mean([info[l] for info in losses])
+            self.writer.add_scalar('VAL/' + l, value, self.num_iters_done)
 
         texts = ['Source: {} \n\n Result: {}'.format(s_x, s_x2y) for s_x, s_x2y in zip(x_all, x2y_all)]
         texts = texts[:10] # If we'll write too many texts, nothing will be displayed in TB

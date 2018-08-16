@@ -201,11 +201,9 @@ class CycleGANTrainer(BaseTrainer):
             losses_info = dict(list(critic_losses_info.items()) + list(gen_losses_info.items()))
             losses.append(losses_info)
 
-        l_names = losses[0].keys()
-
-        for l in l_names:
+        for l in losses[0].keys():
             value = np.mean([info[l] for info in losses])
-            self.writer.add_scalar('val_losses/' + l, value, self.num_iters_done)
+            self.writer.add_scalar('VAL/' + l, value, self.num_iters_done)
 
         # Ok, let's now validate style transfer and auto-encoding
         self.validate_inference()
