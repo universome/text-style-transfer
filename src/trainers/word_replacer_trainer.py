@@ -54,9 +54,13 @@ class WordReplacerTrainer(BaseTrainer):
     def init_models(self):
         self.generator_x2y = cudable(nn.ModuleList([
             TransformerEncoder(self.config.hp.transformer, self.vocab),
-            nn.Linear(self.config.hp.transformer.d_model, len(self.vocab))
+            nn.Linear(self.config.hp.transformer.d_model, len(self.vocab)),
+            nn.Softmax(dim=2)
         ]))
         self.critic_y = cudable(TransformerCritic(self.config.hp.transformer, self.vocab))
+
+        if self.config.hp.share_embeddings:
+            self.generator_x2y[0].embed.weight = self.critic_y.encoder.embed.weight
 
     def init_criterions(self):
         self.gen_criterion = WGeneratorLoss()
@@ -94,7 +98,7 @@ class WordReplacerTrainer(BaseTrainer):
         gen_loss = self.gen_criterion(preds_on_fake)
         critic_loss = self.critic_criterion(preds_on_real, preds_on_fake)
 
-        tokens = logits.max(dim=-1)[1]
+        tokens = logits.max(dim=2)[1]
 
         x = itos_many(batch.domain_x, self.vocab)
         x2y = itos_many(tokens, self.vocab)
@@ -121,7 +125,7 @@ class WordReplacerTrainer(BaseTrainer):
         self.writer.add_scalar('VAL/critic', np.mean(critic_losses), self.num_iters_done)
         self.writer.add_scalar('VAL/bleu', np.mean(bleus), self.num_iters_done)
 
-        texts = ['{} => {}'.format(s_x, s_x2y) for s_x, s_x2y in zip(x_all, x2y_all)]
+        texts = ['Source: {} \n\n Result: {}'.format(s_x, s_x2y) for s_x, s_x2y in zip(x_all, x2y_all)]
         texts = texts[:10] # If we'll write too many texts, nothing will be displayed in TB
         text = '\n ---------- \n'.join(texts)
 
