@@ -10,7 +10,7 @@ from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils import cudable, grad_norm
+from firelab.utils import cudable, grad_norm, determine_turn
 from sklearn.model_selection import train_test_split
 
 from src.models.transformer.utils import pad_mask
@@ -71,17 +71,16 @@ class WordReplacerTrainer(BaseTrainer):
         self.optim_critic = Adam(self.critic_y.parameters(), lr=self.config.hp.lr)
 
     def train_on_batch(self, batch):
-        # Try training crtici for N steps and generator for 1 step
-        # Try reconstruction loss for generator (gradually reducing it)
         gen_loss, critic_loss, bleu, *_ = self.loss_on_batch(batch)
 
-        self.optim_critic.zero_grad()
-        critic_loss.backward(retain_graph=True)
-        self.optim_critic.step()
-
-        self.optim_gen.zero_grad()
-        gen_loss.backward()
-        self.optim_gen.step()
+        if determine_turn(self.num_iters_done, [self.config.hp.n_critic, 1]) == 0:
+            self.optim_critic.zero_grad()
+            critic_loss.backward(retain_graph=True)
+            self.optim_critic.step()
+        else:
+            self.optim_gen.zero_grad()
+            gen_loss.backward()
+            self.optim_gen.step()
 
         self.writer.add_scalar('Train/critic_loss', critic_loss.item(), self.num_iters_done)
         self.writer.add_scalar('Train/gen_loss', gen_loss.item(), self.num_iters_done)

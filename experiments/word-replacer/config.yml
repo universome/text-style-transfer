@@ -19,6 +19,8 @@ hp:
   lr: 0.001
   batch_size: 64
   share_embeddings: false
+  rec_loss_coef: [1., 0., 30000]
+  n_critic: 10
   transformer:
     d_model: 512
     dropout: 0.3
