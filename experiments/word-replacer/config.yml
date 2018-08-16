@@ -2,6 +2,8 @@ trainer: "WordReplacerTrainer"
 data:
   domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
   domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
+  # domain_x: "data/shakespeare/modern.tok"
+  # domain_y: "data/shakespeare/original.tok"
 max_num_epochs: 30
 val_freq_iters: 64
 val_set_size: 64
@@ -19,10 +21,11 @@ hp:
   lr: 0.001
   batch_size: 64
   share_embeddings: false
+  gp_lambda: 10
   loss_coefs:
-    rec: [1., 0., 30000.]
-    gen: [0., 1., 30000.]
-  n_critic: 10
+    rec: [2., 0.1, 5000.]
+    gen: [0., 1., 10000.]
+  gan_sequencing: [1, 10]
   transformer:
     d_model: 512
     dropout: 0.3

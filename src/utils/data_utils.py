@@ -31,18 +31,20 @@ def init_emb_matrix(emb_matrix, emb_dict, token2id):
         emb_matrix[idx] = torch.FloatTensor(emb_dict[word])
 
 
-def remove_spec_symbols(ids_seqs):
-    spec_symbols = set([constants.PAD, constants.BOS, constants.EOS])
-    return [[t for t in s if not t in spec_symbols] for s in ids_seqs]
+def remove_special_symbols(sentences):
+    return [[t for t in s if not t in SPECIAL_TOKENS] for s in sentences]
 
 
-def itos_many(seqs, vocab):
+def itos_many(seqs, vocab, should_remove_special_symbols=True):
     """
     Converts sequences of token ids to normal strings
     """
 
     sents = [[vocab.itos[i] for i in seq] for seq in seqs]
-    sents = [[t for t in s if not t in SPECIAL_TOKENS] for s in sents]
+
+    if should_remove_special_symbols:
+        sents = remove_special_symbols(sents)
+
     sents = [' '.join(s).replace('@@ ', '') for s in sents]
 
     return sents

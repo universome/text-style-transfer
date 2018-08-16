@@ -10,14 +10,14 @@ from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils import cudable, grad_norm, determine_turn, HPLinearScheme
+from firelab.utils import cudable, grad_norm, determine_turn, HPLinearScheme, onehot_encode
 from sklearn.model_selection import train_test_split
 
 from src.models.transformer.utils import pad_mask
 from src.models.transformer import TransformerEncoder, TransformerCritic
 from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents
-from src.losses.gan_losses import WCriticLoss, WGeneratorLoss
+from src.losses.gan_losses import WCriticLoss, WGeneratorLoss, wgan_gp
 
 
 class WordReplacerTrainer(BaseTrainer):
@@ -74,7 +74,7 @@ class WordReplacerTrainer(BaseTrainer):
     def train_on_batch(self, batch):
         gen_total_loss, critic_loss, losses_info, *_ = self.loss_on_batch(batch)
 
-        if determine_turn(self.num_iters_done, [self.config.hp.n_critic, 1]) == 0:
+        if determine_turn(self.num_iters_done, self.config.hp.gan_sequencing) == 0:
             self.optim_critic.zero_grad()
             critic_loss.backward(retain_graph=True)
             self.optim_critic.step()
@@ -83,7 +83,7 @@ class WordReplacerTrainer(BaseTrainer):
             gen_total_loss.backward()
             self.optim_gen.step()
 
-        self.write_losses(losses_info)
+        self.write_losses({('TRAIN/' + k): losses_info[k] for k in losses_info})
 
     def loss_on_batch(self, batch):
         embs, _ = self.generator_x2y[0](batch.domain_x)
@@ -91,7 +91,7 @@ class WordReplacerTrainer(BaseTrainer):
         probs = self.generator_x2y[2](logits)
         enc_mask = pad_mask(batch.domain_x, self.vocab).unsqueeze(1)
 
-        preds_on_fake = self.critic_y(logits, enc_mask, onehot=False)
+        preds_on_fake = self.critic_y(probs, enc_mask, onehot=False)
         preds_on_real = self.critic_y(batch.domain_y)
 
         rec_loss = self.rec_crit(logits.view(-1, len(self.vocab)), batch.domain_x.contiguous().view(-1))
@@ -100,22 +100,26 @@ class WordReplacerTrainer(BaseTrainer):
         gen_loss_coef = HPLinearScheme(*self.config.hp.loss_coefs.gen).evaluate(self.num_iters_done)
         gen_total_loss = rec_loss_coef * rec_loss + gen_loss_coef * gen_loss
 
+        true_onehot = onehot_encode(batch.domain_x, len(self.vocab)).float()
+        gp = wgan_gp(self.critic_y, true_onehot, probs, enc_mask, onehot=False)
         critic_loss = self.critic_criterion(preds_on_real, preds_on_fake)
+        critic_total_loss = critic_loss + self.config.hp.gp_lambda * gp
 
         tokens = logits.max(dim=2)[1]
 
         x = itos_many(batch.domain_x, self.vocab)
-        x2y = itos_many(tokens, self.vocab)
+        x2y = itos_many(tokens, self.vocab, False)
         bleu = compute_bleu_for_sents(x2y, x)
 
         losses_info = {
             'rec_loss': rec_loss.item(),
             'gen_loss': gen_loss.item(),
             'critic_loss': critic_loss.item(),
-            'bleu': bleu
+            'bleu': bleu,
+            'gp': gp.item(),
         }
 
-        return gen_total_loss, critic_loss, losses_info, x, x2y
+        return gen_total_loss, critic_total_loss, losses_info, x, x2y
 
     def validate(self):
         losses = []
@@ -123,7 +127,8 @@ class WordReplacerTrainer(BaseTrainer):
         x2y_all = []
 
         for batch in self.val_dataloader:
-            _, _, losses_info, x, x2y = self.loss_on_batch(batch)
+            with torch.enable_grad():
+                _, _, losses_info, x, x2y = self.loss_on_batch(batch)
             losses.append(losses_info)
             x_all.extend(x)
             x2y_all.extend(x2y)
