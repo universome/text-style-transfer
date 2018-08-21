@@ -1,0 +1,30 @@
+title: "AutoEncoder with Transformer Embedder"
+trainer: "TransformerEmbedderTrainer"
+# data: "data/multi30k/train.en"
+data: "data/yelp/yelp-positive-short.en.tok.bpe"
+max_num_epochs: 30
+val_freq_iters: 200
+val_set_size: 1000
+modules:
+  models: ["encoder", "decoder"]
+  optims: ["optim"]
+checkpoint:
+  freq_epochs: 1
+random_seed: 42
+early_stopping:
+  loss: "val_bleu"
+  history_length: 50
+  should_decrease: false
+hp:
+  lr: 0.001
+  batch_size: 128
+  min_len: 10
+  max_len: 50
+  n_vecs: 3
+  transformer:
+    d_model: 256
+    dropout: 0.1
+    n_layers: 2
+    pe_max_len: 100
+    n_heads: 2
+    d_ff: 1024
