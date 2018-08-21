@@ -16,3 +16,16 @@ class Dropword(nn.Module):
         mask = cudable(mask).unsqueeze(-1).repeat(1, 1, x.size(2))
 
         return x * mask if self.training else x
+
+
+class NoiseLayer(nn.Module):
+    def __init__(self, sigma):
+        super(NoiseLayer, self).__init__()
+        self.sigma = sigma
+
+    def forward(self, x):
+        if not self.is_training: return x
+
+        noise = torch.zeros_like(x).normal_()
+
+        return x + self.sigma * noise
