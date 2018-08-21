@@ -19,6 +19,7 @@ class Encoder(nn.Module):
         ])
         self.dropout = nn.Dropout(config.dropout)
         self.norm = nn.LayerNorm(config.d_model)
+        # self.noise = NoiseLayer(config.noiseness)
 
     def forward(self, x, mask=None, onehot=True):
         mask = mask if not mask is None else pad_mask(x, self.vocab_src).unsqueeze(1)
@@ -26,6 +27,7 @@ class Encoder(nn.Module):
         x = self.embed(x) if onehot else torch.matmul(x, self.embed.weight)
         x = x * np.sqrt(self.config.d_model)
         x = self.pe(x)
+        # x = self.noise(x)
 
         for layer in self.layers:
             x = layer(x, mask)
@@ -40,10 +42,12 @@ class EncoderLayer(nn.Module):
         self.self_attn_sl = SublayerConnection(config)
         self.out_ff = FeedForward(config)
         self.out_ff_sl = SublayerConnection(config)
+        # self.noise = NoiseLayer(config.noiseness)
 
     def forward(self, x, mask):
         "Follow Figure 1 (left) for connections."
         x = self.self_attn_sl(x, lambda x: self.self_attn(x, x, x, mask))
         x = self.out_ff_sl(x, self.out_ff)
+        # x = self.noise(x)
 
         return x

@@ -8,9 +8,9 @@ class PositionalEncoding(nn.Module):
         super(PositionalEncoding, self).__init__()
 
         # Compute the positional encodings in log space.
-        pe = torch.zeros(config.max_len, config.d_model)
+        pe = torch.zeros(config.pe_max_len, config.d_model)
 
-        ln_enumerator = torch.log(torch.arange(0., config.max_len))
+        ln_enumerator = torch.log(torch.arange(0., config.pe_max_len))
         ln_denumerator = torch.arange(0., config.d_model, 2) * (4 * np.log(10) / config.d_model)
         inner_term = torch.exp(ln_enumerator.unsqueeze(1) - ln_denumerator.unsqueeze(0))
 
@@ -44,6 +44,7 @@ class MultiHeadAttention(nn.Module):
         self.output_map = nn.Linear(config.d_model, config.d_model)
 
     def forward(self, query, key, value, mask=None):
+        assert query.size(0) == key.size(0) == value.size(0)
         assert query.size(2) == key.size(2) == value.size(2) == self.config.d_model
 
         if mask is not None:
@@ -83,7 +84,9 @@ class ScaledDotProductAttention(nn.Module):
         head_size = q.size(-1)
 
         scores = torch.matmul(q, k.transpose(-2, -1)) / np.sqrt(head_size)
-        scores.masked_fill_(mask == 0, -1e9)
+
+        if not mask is None:
+            scores.masked_fill_(mask == 0, -1e9)
 
         weights = self.softmax(scores)
         weights = self.dropout(weights)
