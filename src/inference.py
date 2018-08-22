@@ -1,4 +1,5 @@
 import torch as T
+import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from firelab.utils import cudable
@@ -54,7 +55,7 @@ def inference(model, z, vocab, enc_mask=None, max_len=100):
     return finished
 
 
-def gumbel_inference(model, memory, vocab, t=1, max_len=100):
+def gumbel_inference(model: nn.Module, memory, vocab, max_lens: list, t: int=1):
     "Differentiable inference with Gumbel softmax"
     batch_size = memory.size(0)
     eps = 1e-16
@@ -64,11 +65,14 @@ def gumbel_inference(model, memory, vocab, t=1, max_len=100):
     finished = [None for _ in range(batch_size)]
     n_finished = 0
 
-    for _ in range(max_len):
+    for _ in range(max(max_lens)):
         next_tokens_dists = model.forward(memory, active, None, onehot=False)[:,-1]
         next_tokens_dists = F.softmax(next_tokens_dists, dim=1)
         next_tokens_dists = gumbel_softmax_sample(next_tokens_dists, t)
         finished_mask = next_tokens_dists.max(dim=-1)[1] == EOS
+        curr_lens = [len(s) for s in active]
+        len_exceeded_mask = cudable(T.tensor([l >= (m-1) for l, m in zip(curr_lens, max_lens)]))
+        finished_mask = finished_mask | len_exceeded_mask
         finished_mask_np = finished_mask.cpu().numpy().astype(bool)
         active = T.cat((active, next_tokens_dists.unsqueeze(1)), dim=1)
         # finished_mask = (next_tokens == EOS).cpu().numpy().astype(bool)

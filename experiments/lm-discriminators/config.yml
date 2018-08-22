@@ -3,8 +3,10 @@ trainer: "LMDiscriminatorsTrainer"
 data:
   # domain_x: "data/generated/classics.split.tok.ne.unk_ne.common.bpe"
   # domain_y: "data/generated/news.ru.tok.ne.unk_ne.common.bpe"
-  domain_x: "data/shakespeare/modern.tok"
-  domain_y: "data/shakespeare/original.tok"
+  # domain_x: "data/shakespeare/modern.tok"
+  # domain_y: "data/shakespeare/original.tok"
+  domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
+  domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
 max_num_epochs: 30
 val_freq_iters: 100
 val_set_size: 100

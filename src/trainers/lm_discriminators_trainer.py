@@ -69,7 +69,7 @@ class LMDiscriminatorsTrainer(BaseTrainer):
     def init_criterions(self):
         self.rec_criterion = cross_entropy_without_pads(self.vocab)
         self.critic_criterion = DiscriminatorLoss()
-        self.kl = nn.KLDivLoss()
+        self.kl = nn.KLDivLoss(reduction='none')
 
     def init_optimizers(self):
         self.lm_optim = Adam(chain(self.lm_x.parameters(), self.lm_y.parameters()), lr=self.config.hp.lr)
@@ -107,7 +107,7 @@ class LMDiscriminatorsTrainer(BaseTrainer):
         clip_grad_norm_([self.emb_y], self.config.hp.grad_clip)
         self.ae_optim.step()
 
-        self.write_losses(losses_info)
+        self.write_losses(losses_info, prefix='TRAIN/')
 
     def loss_on_batch(self, batch):
         # LM losses
@@ -158,14 +158,19 @@ class LMDiscriminatorsTrainer(BaseTrainer):
         # Our loss is KL loss between LM predictions and decoder predictions
         embs = self.encoder(text)
         embs = T.cat((embs, style_emb.repeat(embs.size(0), 1, 1)), dim=1)
-        preds = gumbel_inference(self.decoder, embs, self.vocab, max_len=self.config.hp.max_len)
+
+        lens = [s.cpu().numpy().tolist().index(self.vocab.stoi['<eos>']) + 1 for s in text]
+        preds = gumbel_inference(self.decoder, embs, self.vocab, lens)
+
         lm_preds = lm(preds[:, :-1], onehot=False)
         lm_preds = F.softmax(lm_preds, dim=2)
-        loss = self.kl(preds[:, 1:].log(), lm_preds)
+        losses = self.kl(preds[:, 1:].log(), lm_preds).sum(dim=2)
+        losses = losses / cudable(T.tensor(lens).float().unsqueeze(1))
+        loss = losses.sum()
 
         assert not T.isnan(embs).any()
         assert not T.isnan(preds).any()
         assert not T.isnan(lm_preds).any()
-        assert not T.isnan(loss).any()
+        assert not T.isnan(losses).any()
 
         return loss
