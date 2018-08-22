@@ -24,6 +24,7 @@ hp:
   min_len: 10
   max_len: 50
   n_vecs: 3
+  grad_clip: 10
   transformer:
     d_model: 256
     dropout: 0.1

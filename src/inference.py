@@ -1,4 +1,5 @@
 import torch as T
+import torch.nn.functional as F
 import numpy as np
 from firelab.utils import cudable
 
@@ -56,14 +57,16 @@ def inference(model, z, vocab, enc_mask=None, max_len=100):
 def gumbel_inference(model, memory, vocab, t=1, max_len=100):
     "Differentiable inference with Gumbel softmax"
     batch_size = memory.size(0)
+    eps = 1e-16
     BOS, EOS, PAD = vocab.stoi['<bos>'], vocab.stoi['<eos>'], vocab.stoi['<pad>']
-    active = cudable(T.zeros(batch_size, 1, len(vocab)).index_fill_(2, T.tensor(BOS), 1.))
+    active = cudable(T.zeros(batch_size, 1, len(vocab)).fill_(eps).index_fill_(2, T.tensor(BOS), 1.))
     active_idx = np.arange(batch_size)
     finished = [None for _ in range(batch_size)]
     n_finished = 0
 
     for _ in range(max_len):
         next_tokens_dists = model.forward(memory, active, None, onehot=False)[:,-1]
+        next_tokens_dists = F.softmax(next_tokens_dists, dim=1)
         next_tokens_dists = gumbel_softmax_sample(next_tokens_dists, t)
         finished_mask = next_tokens_dists.max(dim=-1)[1] == EOS
         finished_mask_np = finished_mask.cpu().numpy().astype(bool)
@@ -95,7 +98,7 @@ def gumbel_inference(model, memory, vocab, t=1, max_len=100):
     for i, seq in enumerate(finished):
         assert len(seq) <= max_len and seq.dim() == 2
         if len(seq) != max_len:
-            pads = cudable(T.zeros(max_len - len(seq), len(vocab)).index_fill_(2, T.tensor(PAD), 1.))
+            pads = cudable(T.zeros(max_len - len(seq), len(vocab)).fill_(eps).index_fill_(1, T.tensor(PAD), 1.))
             finished[i] = T.cat((seq, pads), dim=0)
 
     finished = cudable(T.stack(finished))

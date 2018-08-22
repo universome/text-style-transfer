@@ -5,6 +5,7 @@ from itertools import chain
 import numpy as np
 import torch as T
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
 from torch.optim import Adam
 from torchtext import data
@@ -83,10 +84,27 @@ class LMDiscriminatorsTrainer(BaseTrainer):
 
         self.lm_optim.zero_grad()
         lm_loss.backward()
+
+        losses_info['lm_x_grad_norm'] = grad_norm(self.lm_x.parameters()).item()
+        losses_info['lm_y_grad_norm'] = grad_norm(self.lm_y.parameters()).item()
+
+        clip_grad_norm_(self.lm_x.parameters(), self.config.hp.grad_clip)
+        clip_grad_norm_(self.lm_y.parameters(), self.config.hp.grad_clip)
+
         self.lm_optim.step()
 
         self.ae_optim.zero_grad()
         ae_loss.backward()
+
+        losses_info['encoder_grad_norm'] = grad_norm(self.encoder.parameters()).item()
+        losses_info['decoder_grad_norm'] = grad_norm(self.decoder.parameters()).item()
+        losses_info['emb_x_grad_norm'] = grad_norm([self.emb_x]).item()
+        losses_info['emb_y_grad_norm'] = grad_norm([self.emb_y]).item()
+
+        clip_grad_norm_(self.encoder.parameters(), self.config.hp.grad_clip)
+        clip_grad_norm_(self.decoder.parameters(), self.config.hp.grad_clip)
+        clip_grad_norm_([self.emb_x], self.config.hp.grad_clip)
+        clip_grad_norm_([self.emb_y], self.config.hp.grad_clip)
         self.ae_optim.step()
 
         self.write_losses(losses_info)
@@ -141,7 +159,13 @@ class LMDiscriminatorsTrainer(BaseTrainer):
         embs = self.encoder(text)
         embs = T.cat((embs, style_emb.repeat(embs.size(0), 1, 1)), dim=1)
         preds = gumbel_inference(self.decoder, embs, self.vocab, max_len=self.config.hp.max_len)
-        lm_preds = lm(preds, onehot=False)
-        loss = self.kl(preds, lm_preds)
+        lm_preds = lm(preds[:, :-1], onehot=False)
+        lm_preds = F.softmax(lm_preds, dim=2)
+        loss = self.kl(preds[:, 1:].log(), lm_preds)
+
+        assert not T.isnan(embs).any()
+        assert not T.isnan(preds).any()
+        assert not T.isnan(lm_preds).any()
+        assert not T.isnan(loss).any()
 
         return loss
