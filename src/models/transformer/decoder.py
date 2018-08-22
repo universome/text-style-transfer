@@ -22,7 +22,7 @@ class Decoder(nn.Module):
         self.linear_out = nn.Linear(config.d_model, len(vocab))
         self.norm = nn.LayerNorm(config.d_model)
 
-    def forward(self, encs, trg, encs_mask, onehot=True):
+    def forward(self, encs, trg, encs_mask=None, onehot=True):
         dec_pad_mask = pad_mask((trg if onehot else trg.max(dim=-1)[1]), self.vocab)
         mask = dec_pad_mask.unsqueeze(1) & subsequent_mask(trg.size(1))
 

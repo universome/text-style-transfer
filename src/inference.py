@@ -66,7 +66,7 @@ def gumbel_inference(model: nn.Module, memory, vocab, max_lens: list, t: int=1):
     n_finished = 0
 
     for _ in range(max(max_lens)):
-        next_tokens_dists = model.forward(memory, active, None, onehot=False)[:,-1]
+        next_tokens_dists = model.forward(memory, active, onehot=False)[:,-1]
         next_tokens_dists = F.softmax(next_tokens_dists, dim=1)
         next_tokens_dists = gumbel_softmax_sample(next_tokens_dists, t)
         finished_mask = next_tokens_dists.max(dim=-1)[1] == EOS
