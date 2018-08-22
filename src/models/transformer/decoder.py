@@ -2,38 +2,41 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+from src.utils.training_utils import embed
 from .layers import MultiHeadAttention, SublayerConnection, PositionalEncoding, FeedForward
 from .utils import pad_mask, subsequent_mask
 
 
 class Decoder(nn.Module):
     "Generic N layer decoder with masking."
-    def __init__(self, config, vocab_trg):
+    def __init__(self, config, vocab):
         super(Decoder, self).__init__()
 
         self.config = config
-        self.vocab_trg = vocab_trg
-        self.embed = nn.Embedding(len(vocab_trg), config.d_model, padding_idx=vocab_trg.stoi['<pad>'])
+        self.vocab = vocab
+        self.embed = nn.Embedding(len(vocab), config.d_model, padding_idx=vocab.stoi['<pad>'])
         self.pe = PositionalEncoding(config)
         self.layers = nn.ModuleList([
             DecoderLayer(config) for _ in range(config.n_layers)
         ])
-        self.linear_out = nn.Linear(config.d_model, len(vocab_trg))
+        self.linear_out = nn.Linear(config.d_model, len(vocab))
         self.norm = nn.LayerNorm(config.d_model)
 
-    def forward(self, encs, trg, encs_mask):
-        mask = pad_mask(trg, self.vocab_trg).unsqueeze(1) & subsequent_mask(trg.size(1))
+    def forward(self, encs, trg, encs_mask, onehot=True):
+        dec_pad_mask = pad_mask((trg if onehot else trg.max(dim=-1)[1]), self.vocab)
+        mask = dec_pad_mask.unsqueeze(1) & subsequent_mask(trg.size(1))
 
-        out = self.embed(trg) * np.sqrt(self.config.d_model)
-        out = self.pe(out)
+        x = embed(self.embed, trg, onehot)
+        x = x * np.sqrt(self.config.d_model)
+        x = self.pe(x)
 
         for layer in self.layers:
-            out = layer(encs, out, encs_mask, mask)
+            x = layer(encs, x, encs_mask, mask)
 
-        out = self.norm(out)
-        out = self.linear_out(out)
+        x = self.norm(x)
+        x = self.linear_out(x)
 
-        return out
+        return x
 
 
 class DecoderLayer(nn.Module):
