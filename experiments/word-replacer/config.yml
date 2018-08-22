@@ -19,7 +19,7 @@ random_seed: 42
 #   should_decrease: false
 hp:
   lr: 0.001
-  batch_size: 64
+  batch_size: 32
   share_embeddings: false
   gp_lambda: 10
   loss_coefs:

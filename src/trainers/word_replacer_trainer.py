@@ -108,7 +108,7 @@ class WordReplacerTrainer(BaseTrainer):
         tokens = logits.max(dim=2)[1]
 
         x = itos_many(batch.domain_x, self.vocab)
-        x2y = itos_many(tokens, self.vocab, False)
+        x2y = itos_many(tokens, self.vocab)
         bleu = compute_bleu_for_sents(x2y, x)
 
         losses_info = {

@@ -1,13 +1,13 @@
 title: "CycleGAN for text style transfer experiments"
 trainer: "CycleGANTrainer"
 data:
-  domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
-  domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
+  domain_x: "data/generated/classics.split.tok.ne.unk_ne.common.bpe"
+  domain_y: "data/generated/news.ru.tok.ne.unk_ne.common.bpe"
   # domain_x: "data/shakespeare/modern.tok"
   # domain_y: "data/shakespeare/original.tok"
 batch_size: 16
 max_num_epochs: 30
-val_freq_iters: 500
+val_freq_iters: 5000
 val_set_size: 500
 modules:
   models: ["encoder", "decoder", "critic_x", "critic_y", "gen_x2y", "gen_y2x"]
@@ -27,6 +27,9 @@ hp:
   lr: 0.001
   gp_lambda: 10
   loss_coefs:
-    l2: [0., 0.05, 10000.]
+    l2: [0.05, 1., 100000.]
   grad_clip: 10
   n_critic: 5
+  min_len: 10
+  max_len: 50
+  noiseness: 0.01

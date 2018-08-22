@@ -3,7 +3,7 @@ trainer: "TransformerEmbedderTrainer"
 # data: "data/multi30k/train.en"
 data: "data/yelp/yelp-positive-short.en.tok.bpe"
 max_num_epochs: 30
-val_freq_iters: 200
+val_freq_iters: 1000
 val_set_size: 1000
 modules:
   models: ["encoder", "decoder"]
@@ -20,7 +20,7 @@ hp:
   batch_size: 128
   min_len: 10
   max_len: 50
-  n_vecs: 3
+  n_vecs: 1
   transformer:
     d_model: 256
     dropout: 0.1

@@ -37,6 +37,9 @@ class CycleGANTrainer(BaseTrainer):
         with open(domain_x_data_path) as f: domain_x = f.read().splitlines()
         with open(domain_y_data_path) as f: domain_y = f.read().splitlines()
 
+        domain_x = [s for s in domain_x if self.config.hp.min_len <= len(s.split()) <= self.config.hp.max_len]
+        domain_y = [s for s in domain_y if self.config.hp.min_len <= len(s.split()) <= self.config.hp.max_len]
+
         text = Field(init_token='<bos>', eos_token='<eos>', batch_first=True)
         fields = [('domain_x', text), ('domain_y', text)]
         examples = [Example.fromlist([m,o], fields) for m,o in zip(domain_x, domain_y)]
