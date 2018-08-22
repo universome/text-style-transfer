@@ -18,6 +18,7 @@ from src.inference import inference
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.models.transformer import TransformerEmbedder, TransformerDecoder
+from src.models.dissonet import RNNEncoder, RNNDecoder
 
 
 class TransformerEmbedderTrainer(BaseTrainer):
@@ -47,8 +48,10 @@ class TransformerEmbedderTrainer(BaseTrainer):
             self.config.hp.batch_size, repeat=False, shuffle=False, sort=False)
 
     def init_models(self):
-        self.encoder = cudable(TransformerEmbedder(self.config.hp.n_vecs, self.config.hp.transformer, self.vocab))
-        self.decoder = cudable(TransformerDecoder(self.config.hp.transformer, self.vocab))
+        # self.encoder = cudable(TransformerEmbedder(self.config.hp.n_vecs, self.config.hp.transformer, self.vocab))
+        # self.decoder = cudable(TransformerDecoder(self.config.hp.transformer, self.vocab))
+        self.encoder = cudable(RNNEncoder(512, 512, len(self.vocab)))
+        self.decoder = cudable(RNNDecoder(512, 512, len(self.vocab)))
 
     def init_criterions(self):
         self.criterion = cross_entropy_without_pads(self.vocab)
@@ -67,7 +70,8 @@ class TransformerEmbedderTrainer(BaseTrainer):
 
     def loss_on_batch(self, batch):
         embs = self.encoder(batch.text)
-        recs = self.decoder(embs, batch.text[:, :-1], None)
+        # recs = self.decoder(embs, batch.text[:, :-1], None)
+        recs = self.decoder(embs, batch.text[:, :-1])
         loss = self.criterion(recs.view(-1, len(self.vocab)), batch.text[:, 1:].contiguous().view(-1))
 
         return loss
@@ -80,9 +84,9 @@ class TransformerEmbedderTrainer(BaseTrainer):
         for batch in self.val_dataloader:
             loss = self.loss_on_batch(batch)
             embs = self.encoder(batch.text)
-            dummy_enc_mask = cudable(torch.ones(embs.size(0), embs.size(1)).byte()).unsqueeze(1)
+            #dummy_enc_mask = cudable(torch.ones(embs.size(0), embs.size(1)).byte()).unsqueeze(1)
 
-            recs = inference(self.decoder, embs, self.vocab, dummy_enc_mask)
+            recs = inference(self.decoder, embs, self.vocab)
 
             recs = itos_many(recs, self.vocab)
             gold = itos_many(batch.text, self.vocab)
