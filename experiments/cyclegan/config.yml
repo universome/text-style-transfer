@@ -26,6 +26,7 @@ hp:
   dropword: 0.1
   lr: 0.001
   gp_lambda: 10
+  ae_pretraining_n_epochs: 3
   loss_coefs:
     l2: [0.05, 1., 100000.]
   grad_clip: 10
