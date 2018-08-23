@@ -13,13 +13,14 @@ from firelab import BaseTrainer
 from firelab.utils import cudable, grad_norm
 from sklearn.model_selection import train_test_split
 
-from src.models.dissonet import RNNEncoder, RNNDecoder, MergeNN, DissoNet
+from src.models.dissonet import RNNEncoder, RNNDecoder, MergeNN, SplitNN, DissoNet
 from src.models import FFN
 from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.gan_losses import WCriticLoss, DiscriminatorLoss
 from src.inference import inference
+from src.utils.style_transfer import transfer_style, get_text_from_sents
 
 
 class DissoNetTrainer(BaseTrainer):
@@ -51,25 +52,27 @@ class DissoNetTrainer(BaseTrainer):
         self.val_dataloader = data.BucketIterator(self.val_ds, batch_size, repeat=False, shuffle=False)
 
     def init_models(self):
-        emb_size = self.config.hp.emb_size
-        hid_size = self.config.hp.hid_size
+        size = self.config.hp.size
         voc_size = len(self.vocab)
         dropout_p = self.config.hp.dropout
         dropword_p = self.config.hp.dropword
 
-        self.encoder = RNNEncoder(emb_size, hid_size, voc_size, dropword_p)
-        self.decoder = RNNDecoder(emb_size, hid_size, voc_size, dropword_p)
-        self.critic = FFN([hid_size, hid_size, 1], dropout=dropout_p)
-        self.merge_nn = MergeNN(hid_size)
+        self.encoder = RNNEncoder(size, size, voc_size, dropword_p)
+        self.decoder = RNNDecoder(size, size, voc_size, dropword_p)
+        self.split_nn = SplitNN(size, self.config.hp.style_vec_size)
+        self.motivator = FFN([self.config.hp.style_vec_size, 1], dropout=dropout_p)
+        self.critic = FFN([size, size, 1], dropout=dropout_p)
+        self.merge_nn = MergeNN(size, self.config.hp.style_vec_size)
 
         # Let's save all ae params into single list for future use
         self.ae_params = list(chain(
             self.encoder.parameters(),
             self.decoder.parameters(),
-            self.merge_nn.parameters()
+            self.split_nn.parameters(),
+            self.merge_nn.parameters(),
         ))
 
-        self.dissonet = cudable(DissoNet(self.encoder, self.decoder, self.critic, self.merge_nn))
+        self.dissonet = cudable(DissoNet(self.encoder, self.decoder, self.split_nn, self.motivator, self.critic, self.merge_nn))
 
         if torch.cuda.device_count() > 1:
             print('Going to parallelize on {} GPUs'.format(torch.cuda.device_count()))
@@ -78,13 +81,15 @@ class DissoNetTrainer(BaseTrainer):
     def init_criterions(self):
         self.rec_criterion = cross_entropy_without_pads(self.vocab)
         self.critic_criterion = WCriticLoss()
+        self.motivator_criterion = nn.BCEWithLogitsLoss()
 
     def init_optimizers(self):
-        self.critic_optim = Adam(self.critic.parameters(), lr=self.config.hp.lr.critic)
-        self.ae_optim = Adam(self.ae_params, lr=self.config.hp.lr.ae)
+        self.ae_optim = Adam(self.ae_params, lr=self.config.hp.lr)
+        self.critic_optim = Adam(self.critic.parameters(), lr=self.config.hp.lr)
+        self.motivator_optim = Adam(self.motivator.parameters(), lr=self.config.hp.lr)
 
     def train_on_batch(self, batch):
-        rec_loss, critic_loss, ae_loss = self.loss_on_batch(batch)
+        ae_loss, motivator_loss, critic_loss, losses_info = self.loss_on_batch(batch)
 
         self.ae_optim.zero_grad()
         ae_loss.backward(retain_graph=True)
@@ -92,45 +97,65 @@ class DissoNetTrainer(BaseTrainer):
         clip_grad_norm_(self.ae_params, self.config.hp.grad_clip)
         self.ae_optim.step()
 
+        self.motivator_optim.zero_grad()
+        motivator_loss.backward(retain_graph=True)
+        ae_grad_norm = grad_norm(self.motivator.parameters())
+        clip_grad_norm_(self.motivator.parameters(), self.config.hp.grad_clip)
+        self.motivator_optim.step()
+
         self.critic_optim.zero_grad()
         critic_loss.backward()
         critic_grad_norm = grad_norm(self.critic.parameters())
         clip_grad_norm_(self.critic.parameters(), self.config.hp.grad_clip)
         self.critic_optim.step()
 
-        self.writer.add_scalar('Train/rec', rec_loss, self.num_iters_done)
-        self.writer.add_scalar('Train/critic', critic_loss, self.num_iters_done)
-        self.writer.add_scalar('Grad norm/ae', ae_grad_norm, self.num_iters_done)
-        self.writer.add_scalar('Grad norm/critic', critic_grad_norm, self.num_iters_done)
+        self.write_losses(losses_info, prefix='TRAIN/')
+        self.writer.add_scalar('TRAIN/grad_norm_ae', ae_grad_norm, self.num_iters_done)
+        self.writer.add_scalar('TRAIN/grad_norm_critic', critic_grad_norm, self.num_iters_done)
 
     def loss_on_batch(self, batch):
-        recs_x, recs_y, critic_preds_x, critic_preds_y = self.dissonet(batch.domain_x, batch.domain_y)
+        recs_x, recs_y, critic_preds_x, critic_preds_y, motivator_preds_x, motivator_preds_y = self.dissonet(batch.domain_x, batch.domain_y)
 
         # Critic loss
         critic_loss = self.critic_criterion(critic_preds_x, critic_preds_y)
 
         # Computing reconstruction loss
-        rec_loss_domain_x = self.rec_criterion(recs_x.view(-1, len(self.vocab)), batch.domain_x[:, 1:].contiguous().view(-1))
-        rec_loss_domain_y = self.rec_criterion(recs_y.view(-1, len(self.vocab)), batch.domain_y[:, 1:].contiguous().view(-1))
-        rec_loss = (rec_loss_domain_x + rec_loss_domain_y) / 2
+        rec_loss_x = self.rec_criterion(recs_x.view(-1, len(self.vocab)), batch.domain_x[:, 1:].contiguous().view(-1))
+        rec_loss_y = self.rec_criterion(recs_y.view(-1, len(self.vocab)), batch.domain_y[:, 1:].contiguous().view(-1))
+        rec_loss = (rec_loss_x + rec_loss_y) / 2
+
+        # Motivator loss
+        motivator_loss_x = self.motivator_criterion(motivator_preds_x, torch.ones_like(motivator_preds_x))
+        motivator_loss_y = self.motivator_criterion(motivator_preds_y, torch.ones_like(motivator_preds_y))
+        motivator_loss = (motivator_loss_x + motivator_loss_y) / 2
 
         # AE loss is twofold
         critic_coef = 0 if critic_loss.item() > self.config.hp.critic_loss_threshold else 1
-        ae_loss = rec_loss - critic_coef * critic_loss
+        motivator_coef = self.config.hp.motivator_coef
+        ae_loss = rec_loss - critic_coef * critic_loss + motivator_coef * motivator_loss
 
-        return rec_loss, critic_loss, ae_loss
+        losses_info = {
+            'rec_loss_x': rec_loss_x,
+            'rec_loss_y': rec_loss_y,
+            'motivator_loss_x': motivator_loss_x,
+            'motivator_loss_y': motivator_loss_y,
+            'critic_loss': critic_loss
+        }
+
+        return ae_loss, motivator_loss, critic_loss, losses_info
 
     def validate(self):
+        losses = []
         rec_losses = []
-        critic_losses = []
 
         for batch in self.val_dataloader:
-            rec_loss, critic_loss, _ = self.loss_on_batch(batch)
+            rec_loss, *_, losses_info = self.loss_on_batch(batch)
             rec_losses.append(rec_loss.item())
-            critic_losses.append(critic_loss.item())
+            losses.append(losses_info)
 
-        self.writer.add_scalar('Val_loss/rec', np.mean(rec_losses), self.num_iters_done)
-        self.writer.add_scalar('Val_loss/critic', np.mean(critic_losses), self.num_iters_done)
+        for l in losses[0].keys():
+            value = np.mean([info[l] for info in losses])
+            self.writer.add_scalar('VAL/' + l, value, self.num_iters_done)
 
         self.losses['val_rec_loss'].append(np.mean(rec_losses))
 
@@ -142,17 +167,17 @@ class DissoNetTrainer(BaseTrainer):
         Performs inference on a val dataloader
         (computes predictions without teacher's forcing)
         """
-        x2y, y2x, x2x, y2y, gx, gy = self.transfer_style(self.val_dataloader)
+        x2y, y2x, x2x, y2y, gx, gy = transfer_style(self.transfer_style_on_batch, self.val_dataloader, self.vocab)
 
         x2y_bleu = compute_bleu_for_sents(x2y, gx)
         y2x_bleu = compute_bleu_for_sents(y2x, gy)
         x2x_bleu = compute_bleu_for_sents(x2x, gx)
         y2y_bleu = compute_bleu_for_sents(y2y, gy)
 
-        self.writer.add_scalar('BLEU/x2y', x2y_bleu, self.num_iters_done)
-        self.writer.add_scalar('BLEU/y2x', y2x_bleu, self.num_iters_done)
-        self.writer.add_scalar('BLEU/x2x', x2x_bleu, self.num_iters_done)
-        self.writer.add_scalar('BLEU/y2y', y2y_bleu, self.num_iters_done)
+        self.writer.add_scalar('VAL/BLEU/x2y', x2y_bleu, self.num_iters_done)
+        self.writer.add_scalar('VAL/BLEU/y2x', y2x_bleu, self.num_iters_done)
+        self.writer.add_scalar('VAL/BLEU/x2x', x2x_bleu, self.num_iters_done)
+        self.writer.add_scalar('VAL/BLEU/y2y', y2y_bleu, self.num_iters_done)
 
         # Ok, let's log generated sequences
         texts = [get_text_from_sents(*sents) for sents in zip(x2y, y2x, x2x, y2y, gx, gy)]
@@ -161,64 +186,21 @@ class DissoNetTrainer(BaseTrainer):
 
         self.writer.add_text('Generated examples', text, self.num_iters_done)
 
-    def transfer_style(self, dataloader):
-        """
-        Produces predictions for a given dataloader
-        """
-        domain_x_to_domain_y = []
-        domain_y_to_domain_x = []
-        domain_x_to_domain_x = []
-        domain_y_to_domain_y = []
-        gold_domain_x = []
-        gold_domain_y = []
-
-        for batch in dataloader:
-            x2y, y2x, x2x, y2y = self.transfer_style_on_batch(batch)
-
-            domain_x_to_domain_y.extend(x2y)
-            domain_y_to_domain_x.extend(y2x)
-            domain_x_to_domain_x.extend(x2x)
-            domain_y_to_domain_y.extend(y2y)
-
-            gold_domain_x.extend(batch.domain_x.detach().cpu().numpy().tolist())
-            gold_domain_y.extend(batch.domain_y.detach().cpu().numpy().tolist())
-
-        # Converting to sentences
-        x2y_sents = itos_many(domain_x_to_domain_y, self.vocab)
-        y2x_sents = itos_many(domain_y_to_domain_x, self.vocab)
-        x2x_sents = itos_many(domain_x_to_domain_x, self.vocab)
-        y2y_sents = itos_many(domain_y_to_domain_y, self.vocab)
-        gx_sents = itos_many(gold_domain_x, self.vocab)
-        gy_sents = itos_many(gold_domain_y, self.vocab)
-
-        return x2y_sents, y2x_sents, x2x_sents, y2y_sents, gx_sents, gy_sents
-
     def transfer_style_on_batch(self, batch):
-        state_domain_x = self.encoder(batch.domain_x)
-        state_domain_y = self.encoder(batch.domain_y)
+        state_x = self.encoder(batch.domain_x)
+        state_y = self.encoder(batch.domain_y)
 
-        x2y_z = self.merge_nn(state_domain_x, 1)
-        y2x_z = self.merge_nn(state_domain_y, 0)
-        x2x_z = self.merge_nn(state_domain_x, 0)
-        y2y_z = self.merge_nn(state_domain_y, 1)
+        content_x, style_x = self.dissonet.split_nn(state_x)
+        content_y, style_y = self.dissonet.split_nn(state_y)
 
-        x2y = inference(self.decoder, x2y_z, self.vocab)
-        y2x = inference(self.decoder, y2x_z, self.vocab)
-        x2x = inference(self.decoder, x2x_z, self.vocab)
-        y2y = inference(self.decoder, y2y_z, self.vocab)
+        state_x2y = self.merge_nn(content_x, style_y)
+        state_y2x = self.merge_nn(content_y, style_x)
+        state_x2x = self.merge_nn(content_x, style_x)
+        state_y2y = self.merge_nn(content_y, style_y)
+
+        x2y = inference(self.decoder, state_x2y, self.vocab)
+        y2x = inference(self.decoder, state_y2x, self.vocab)
+        x2x = inference(self.decoder, state_x2x, self.vocab)
+        y2y = inference(self.decoder, state_y2y, self.vocab)
 
         return x2y, y2x, x2x, y2y
-
-
-def get_text_from_sents(x2y_s, y2x_s, x2x_s, y2y_s, gx_s, gy_s):
-    # TODO: Move this somewhere from trainer file? Or create some nice template?
-    return """
-        Gold X: [{}]
-        Gold Y: [{}]
-
-        x2y: [{}]
-        y2x: [{}]
-
-        x2x: [{}]
-        y2y: [{}]
-    """.format(gx_s, gy_s, x2y_s, y2x_s, x2x_s, y2y_s)

@@ -6,27 +6,22 @@ from src.models import FFN
 
 
 class MergeNN(nn.Module):
-    def __init__(self, hid_size):
+    def __init__(self, size, style_vec_size):
         super(MergeNN, self).__init__()
 
-        self.style_embed = nn.Embedding(2, hid_size)
         self.merge = nn.Sequential(
-            FFN([hid_size * 2, hid_size]),
-            nn.BatchNorm1d(hid_size)
+            FFN([size + style_vec_size, size]),
+            nn.BatchNorm1d(size)
         )
 
-    def forward(self, content: torch.Tensor, style: int):
+    def forward(self, content: torch.Tensor, style: torch.Tensor):
         """
-        Computes embeddings for style and merges it with content vectors
-        Then passes all this through MLP to output a vector of normal size
+        Takes content vector and style vectors, concatenates them,
+        passes through an MLP and outputs
 
         Arguments:
             content (torch.Tensor): content vectors
-            style (int): binary var, denoting if it is source/target
+            style (torch.Tensor): style vectors
         """
-        style_seq = cudable(torch.ones(content.size(0)) * style).long()
-        style_embs = self.style_embed(style_seq)
 
-        out = self.merge(torch.cat([style_embs, content], dim=1))
-
-        return out
+        return self.merge(torch.cat([style, content], dim=1))
