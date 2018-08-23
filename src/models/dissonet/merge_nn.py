@@ -24,4 +24,6 @@ class MergeNN(nn.Module):
             style (torch.Tensor): style vectors
         """
 
-        return self.merge(torch.cat([style, content], dim=1))
+        out = self.merge(torch.cat([content, style], dim=1))
+
+        return out

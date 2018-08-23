@@ -21,7 +21,7 @@ early_stopping:
   history_length: 50
   should_decrease: true
 hp:
-  batch_size: 42
+  batch_size: 32
   size: 512
   dropout: 0.1
   dropword: 0.1

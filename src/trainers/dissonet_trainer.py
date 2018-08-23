@@ -89,6 +89,8 @@ class DissoNetTrainer(BaseTrainer):
         self.motivator_optim = Adam(self.motivator.parameters(), lr=self.config.hp.lr)
 
     def train_on_batch(self, batch):
+        if batch.batch_size == 1: return # We can't train on batches of size 1 because of BatchNorm
+
         ae_loss, motivator_loss, critic_loss, losses_info = self.loss_on_batch(batch)
 
         self.ae_optim.zero_grad()
@@ -137,12 +139,12 @@ class DissoNetTrainer(BaseTrainer):
         ae_loss = rec_loss - critic_coef * critic_loss + motivator_coef * motivator_loss
 
         losses_info = {
-            'rec_loss_x': rec_loss_x,
-            'rec_loss_y': rec_loss_y,
-            'motivator_loss_x': motivator_loss_x,
-            'motivator_loss_y': motivator_loss_y,
-            'critic_loss': critic_loss,
-            'critic_gp': critic_gp,
+            'rec_loss_x': rec_loss_x.item(),
+            'rec_loss_y': rec_loss_y.item(),
+            'motivator_loss_x': motivator_loss_x.item(),
+            'motivator_loss_y': motivator_loss_y.item(),
+            'critic_loss': critic_loss.item(),
+            'critic_gp': critic_gp.item(),
         }
 
         return ae_loss, motivator_loss, critic_total_loss, losses_info
