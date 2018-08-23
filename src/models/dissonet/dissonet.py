@@ -32,4 +32,4 @@ class DissoNet(nn.Module):
         motivator_preds_x = self.motivator(style_x)
         motivator_preds_y = self.motivator(style_y)
 
-        return recs_x, recs_y, critic_preds_x, critic_preds_y, motivator_preds_x, motivator_preds_y
+        return recs_x, recs_y, critic_preds_x, critic_preds_y, motivator_preds_x, motivator_preds_y, content_x, content_y

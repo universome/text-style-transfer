@@ -18,7 +18,7 @@ from src.models import FFN
 from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
-from src.losses.gan_losses import WCriticLoss, DiscriminatorLoss
+from src.losses.gan_losses import WCriticLoss, DiscriminatorLoss, wgan_gp
 from src.inference import inference
 from src.utils.style_transfer import transfer_style, get_text_from_sents
 
@@ -114,10 +114,12 @@ class DissoNetTrainer(BaseTrainer):
         self.writer.add_scalar('TRAIN/grad_norm_critic', critic_grad_norm, self.num_iters_done)
 
     def loss_on_batch(self, batch):
-        recs_x, recs_y, critic_preds_x, critic_preds_y, motivator_preds_x, motivator_preds_y = self.dissonet(batch.domain_x, batch.domain_y)
+        recs_x, recs_y, critic_preds_x, critic_preds_y, motivator_preds_x, motivator_preds_y, content_x, content_y = self.dissonet(batch.domain_x, batch.domain_y)
 
         # Critic loss
         critic_loss = self.critic_criterion(critic_preds_x, critic_preds_y)
+        critic_gp = wgan_gp(self.critic, content_x, content_y)
+        critic_total_loss = critic_loss + self.config.hp.gp_lambda * critic_gp
 
         # Computing reconstruction loss
         rec_loss_x = self.rec_criterion(recs_x.view(-1, len(self.vocab)), batch.domain_x[:, 1:].contiguous().view(-1))
@@ -139,17 +141,19 @@ class DissoNetTrainer(BaseTrainer):
             'rec_loss_y': rec_loss_y,
             'motivator_loss_x': motivator_loss_x,
             'motivator_loss_y': motivator_loss_y,
-            'critic_loss': critic_loss
+            'critic_loss': critic_loss,
+            'critic_gp': critic_gp,
         }
 
-        return ae_loss, motivator_loss, critic_loss, losses_info
+        return ae_loss, motivator_loss, critic_total_loss, losses_info
 
     def validate(self):
         losses = []
         rec_losses = []
 
         for batch in self.val_dataloader:
-            rec_loss, *_, losses_info = self.loss_on_batch(batch)
+            with torch.enable_grad():
+                rec_loss, *_, losses_info = self.loss_on_batch(batch)
             rec_losses.append(rec_loss.item())
             losses.append(losses_info)
 

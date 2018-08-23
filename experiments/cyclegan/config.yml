@@ -1,8 +1,8 @@
 title: "CycleGAN for text style transfer experiments"
 trainer: "CycleGANTrainer"
 data:
-  domain_x: "data/generated/classics.split.tok.ne.unk_ne.common.bpe"
-  domain_y: "data/generated/news.ru.tok.ne.unk_ne.common.bpe"
+  domain_x: "data/generated/classics.split.tok.5_50.common.bpe"
+  domain_y: "data/generated/news.ru.tok.5_50.common.bpe"
   # domain_x: "data/shakespeare/modern.tok"
   # domain_y: "data/shakespeare/original.tok"
 batch_size: 16

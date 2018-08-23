@@ -1,10 +1,10 @@
 title: "DissoNet experiments"
 trainer: "DissoNetTrainer"
 data:
+  domain_x: "data/generated/classics.split.tok.5_50.common.bpe"
+  domain_y: "data/generated/news.ru.tok.5_50.common.bpe"
   # domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
   # domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
-  domain_x: "data/generated/classics.split.tok.ne.unk_ne.common.bpe"
-  domain_y: "data/generated/news.ru.tok.ne.unk_ne.common.bpe"
   # domain_x: "data/shakespeare/modern.tok"
   # domain_y: "data/shakespeare/original.tok"
 max_num_epochs: 30
@@ -21,11 +21,12 @@ early_stopping:
   history_length: 50
   should_decrease: true
 hp:
+  batch_size: 42
   size: 512
   dropout: 0.1
   dropword: 0.1
-  batch_size: 42
   lr: 0.001
+  gp_lambda: 10
   motivator_coef: 0.1
   style_vec_size: 32
   critic_loss_threshold: -5
