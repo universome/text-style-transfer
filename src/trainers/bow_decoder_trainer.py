@@ -16,7 +16,7 @@ from src.models import FFN
 from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
-from src.losses.wgan_loss import WGANLoss
+from src.losses.gan_losses import WCriticLoss
 from src.inference import inference
 
 
