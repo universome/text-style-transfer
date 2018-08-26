@@ -1,0 +1,22 @@
+title: "Character-level word model for word-level style transfer"
+trainer: "CharWMTrainer"
+data: "data/generated/non_common_words_ru.txt"
+# data: "data/generated/tmp_words"
+batch_size: 256
+max_num_epochs: 100
+# val_freq_iters: 1000
+val_freq_epochs: 1
+val_set_size: 10000
+modules:
+  models: ["lm"]
+  optims: ["optim"]
+checkpoint:
+  freq_epochs: 1
+random_seed: 42
+early_stopping:
+  loss: "val_loss"
+  history_length: 50
+  should_decrease: true
+hp:
+  lr: 0.001
+  model_size: 512

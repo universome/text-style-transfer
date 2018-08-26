@@ -35,7 +35,7 @@ def remove_special_symbols(sentences):
     return [[t for t in s if not t in SPECIAL_TOKENS] for s in sentences]
 
 
-def itos_many(seqs, vocab, should_remove_special_symbols=True):
+def itos_many(seqs, vocab, should_remove_special_symbols=True, sep=' '):
     """
     Converts sequences of token ids to normal strings
     """
@@ -45,6 +45,6 @@ def itos_many(seqs, vocab, should_remove_special_symbols=True):
     if should_remove_special_symbols:
         sents = remove_special_symbols(sents)
 
-    sents = [' '.join(s).replace('@@ ', '') for s in sents]
+    sents = [sep.join(s).replace('@@ ', '') for s in sents]
 
     return sents

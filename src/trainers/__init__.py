@@ -6,6 +6,7 @@ from .word_replacer_trainer import WordReplacerTrainer
 from .transformer_embedder_trainer import TransformerEmbedderTrainer
 from .lm_discriminators_trainer import LMDiscriminatorsTrainer
 from .classifier_trainer import ClassifierTrainer
+from .char_wm_trainer import CharWMTrainer
 
 __all__ = [
     "DissoNetTrainer",
@@ -16,4 +17,5 @@ __all__ = [
     "TransformerEmbedderTrainer",
     "LMDiscriminatorsTrainer",
     "ClassifierTrainer",
+    "CharWMTrainer",
 ]
