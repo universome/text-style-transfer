@@ -65,7 +65,7 @@ class CycleGANTrainer(BaseTrainer):
 
         def create_gen():
             return nn.Sequential(
-                FFN([hid_size, hid_size, hid_size], dropout_p),
+                FFN([hid_size, hid_size], dropout_p),
                 # nn.Tanh()
             )
 
@@ -133,7 +133,8 @@ class CycleGANTrainer(BaseTrainer):
         self.write_losses(losses_info, prefix='TRAIN/')
 
     def train_gen_on_batch(self, batch):
-        gen_loss, losses_info = self.gen_loss_on_batch(batch)
+        ae_loss, ae_losses_info = self.ae_loss_on_batch(batch) # Never stop trainig AE
+        gen_loss, gen_losses_info = self.gen_loss_on_batch(batch)
 
         # Generators
         self.gen_optim.zero_grad()
@@ -142,8 +143,17 @@ class CycleGANTrainer(BaseTrainer):
         clip_grad_norm_(self.gen_params, self.config.hp.grad_clip)
         self.gen_optim.step()
 
-        losses_info['grad norm/gen'] = gen_grad_norm.item()
-        self.write_losses(losses_info, prefix='TRAIN/')
+        # AE
+        self.ae_optim.zero_grad()
+        ae_loss.backward(retain_graph=True)
+        ae_grad_norm = grad_norm(self.ae_params)
+        clip_grad_norm_(self.ae_params, self.config.hp.grad_clip)
+        self.ae_optim.step()
+
+        gen_losses_info['grad norm/gen'] = gen_grad_norm.item()
+        ae_losses_info['grad norm/ae'] = ae_grad_norm.item()
+        self.write_losses(gen_losses_info, prefix='TRAIN/')
+        self.write_losses(ae_losses_info, prefix='TRAIN/')
 
     def ae_loss_on_batch(self, batch):
         x_hid = self.encoder(batch.domain_x)
