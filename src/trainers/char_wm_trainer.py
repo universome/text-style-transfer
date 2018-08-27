@@ -10,7 +10,7 @@ from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils import cudable
+from firelab.utils.training_utils import cudable
 
 from src.models import RNNLM
 from src.losses.ce_without_pads import cross_entropy_without_pads

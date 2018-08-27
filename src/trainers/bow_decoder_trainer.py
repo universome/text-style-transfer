@@ -9,7 +9,7 @@ from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils import cudable
+from firelab.utils.training_utils import cudable
 
 from src.models.dissonet import RNNEncoder, RNNDecoder
 from src.models import FFN

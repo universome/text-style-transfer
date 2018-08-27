@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch.optim import Adam
 from torchtext import data, datasets
 from firelab import BaseTrainer
-from firelab.utils import cudable
+from firelab.utils.training_utils import cudable
 
 from src.models.transformer import Transformer
 from src.utils.data_utils import itos_many
@@ -70,6 +70,7 @@ class TransformerMTTrainer(BaseTrainer):
         self.writer.add_scalar('train/rec_loss', rec_loss, self.num_iters_done)
 
     def loss_on_batch(self, batch):
+        batch.src, batch.trg = cudable(batch.src), cudable(batch.trg)
         recs = self.transformer(batch.src, batch.trg)
         targets = batch.trg[:, 1:].contiguous().view(-1)
         rec_loss = self.criterion(recs.view(-1, len(self.vocab_trg)), targets)
@@ -81,13 +82,14 @@ class TransformerMTTrainer(BaseTrainer):
         bleus = []
 
         for batch in self.val_dataloader:
+            batch.src, batch.trg = cudable(batch.src), cudable(batch.trg)
             # CE loss
             rec_loss = self.loss_on_batch(batch)
             rec_losses.append(rec_loss.item())
 
             # BLEU
             encs, enc_mask = self.transformer.encoder(batch.src)
-            preds = inference(self.transformer.decoder, encs, self.vocab_trg, enc_mask, self.config.hp.transformer.max_len)
+            preds = inference(self.transformer.decoder, encs, self.vocab_trg, enc_mask, max_len=50)
             preds = itos_many(preds, self.vocab_trg)
             gold = itos_many(batch.trg, self.vocab_trg)
             bleu = compute_bleu_for_sents(preds, gold)

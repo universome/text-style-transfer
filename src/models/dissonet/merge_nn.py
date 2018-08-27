@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from firelab.utils import cudable
+from firelab.utils.training_utils import cudable
 
 from src.models import FFN
 

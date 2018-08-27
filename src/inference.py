@@ -2,7 +2,7 @@ import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from firelab.utils import cudable
+from firelab.utils.training_utils import cudable
 
 from src.utils.gumbel import gumbel_softmax_sample
 

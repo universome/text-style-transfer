@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from firelab.utils import cudable
+from firelab.utils.training_utils import cudable
 
 
 def pad_mask(seq, vocab):

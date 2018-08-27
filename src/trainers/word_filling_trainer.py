@@ -10,7 +10,7 @@ from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils import cudable
+from firelab.utils.training_utils import cudable
 from sklearn.model_selection import train_test_split
 
 from src.models.dissonet import RNNEncoder, RNNDecoder
@@ -47,9 +47,9 @@ class WordFillingTrainer(BaseTrainer):
 
         self.vocab_src, self.vocab_trg = text_src.vocab, text_trg.vocab
         self.train_dataloader = data.BucketIterator(
-            self.train_ds, self.config.batch_size, repeat=False)
+            self.train_ds, self.config.hp.batch_size, repeat=False)
         self.val_dataloader = data.BucketIterator(
-            self.val_ds, self.config.batch_size, repeat=False)
+            self.val_ds, self.config.hp.batch_size, repeat=False)
 
     def init_models(self):
         size = self.config.hp.model_size

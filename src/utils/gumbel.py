@@ -5,7 +5,7 @@ Taken from https://gist.github.com/yzh119/fd2146d2aeb329d067568a493b20172f
 
 import torch
 import torch.nn.functional as F
-from firelab.utils import cudable
+from firelab.utils.training_utils import cudable
 
 
 def sample_gumbel(shape, eps=1e-20):

@@ -9,7 +9,7 @@ from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils import cudable
+from firelab.utils.training_utils import cudable
 from sklearn.model_selection import train_test_split
 
 from src.models import RNNClassifier

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.autograd as autograd
 import numpy as np
-from firelab.utils import cudable
+from firelab.utils.training_utils import cudable
 
 
 class WCriticLoss(nn.Module):

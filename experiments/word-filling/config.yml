@@ -5,10 +5,9 @@ data:
   trg: "data/generated/classics-dropped-words.trg"
   # src: "data/generated/tmp_words"
   # trg: "data/generated/tmp_words"
-batch_size: 256
 max_num_epochs: 100
-# val_freq_iters: 1000
-val_freq_epochs: 1
+val_freq_iters: 1000
+# val_freq_epochs: 1
 val_set_size: 1000
 modules:
   models: ["encoder", "decoder"]
@@ -22,4 +21,5 @@ early_stopping:
   should_decrease: true
 hp:
   lr: 0.001
+  batch_size: 256
   model_size: 512

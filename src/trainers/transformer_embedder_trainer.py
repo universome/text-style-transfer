@@ -10,7 +10,8 @@ from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils import cudable, grad_norm, filter_sents_by_len
+from firelab.utils.training_utils import cudable, grad_norm
+from firelab.utils.data_utils import filter_sents_by_len
 from sklearn.model_selection import train_test_split
 
 from src.utils.data_utils import itos_many

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from firelab.utils import cudable
+from firelab.utils.training_utils import cudable
 
 from .layers import PositionalEncoding
 from .encoder import EncoderLayer

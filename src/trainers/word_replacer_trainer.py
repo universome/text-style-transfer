@@ -10,7 +10,8 @@ from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils import cudable, grad_norm, determine_turn, HPLinearScheme, onehot_encode
+from firelab.utils.training_utils import cudable, grad_norm, determine_turn, HPLinearScheme
+from firelab.utils.data_utils import onehot_encode
 from sklearn.model_selection import train_test_split
 
 from src.models.transformer.utils import pad_mask
