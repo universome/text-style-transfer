@@ -11,6 +11,7 @@ def prepare_subs_for_open_nmt(data_path):
     print('Preparing subs for open-nmt')
     print('Reading data...')
     data = read_corpus(data_path)
+    # data = [s for s in data if 5 <= len(s.split()) <= 20] # Removing noise
     src = data[:-1]
     trg = data[1:]
 

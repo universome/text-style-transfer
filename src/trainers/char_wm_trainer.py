@@ -96,7 +96,7 @@ class CharWMTrainer(BaseTrainer):
             generated.extend(results)
             gold.extend(itos_many(batch.text, self.vocab, sep=''))
 
-        # Let's try to measure BLEU scores (also it's not valid for words)
+        # Let's try to measure BLEU scores (although it's not valid for words)
         sents_generated = [' '.join(list(s[4:])) for s in generated]
         sents_gold = [' '.join(list(s[4:])) for s in gold]
         bleu = compute_bleu_for_sents(sents_generated, sents_gold)
