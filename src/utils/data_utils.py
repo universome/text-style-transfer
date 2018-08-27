@@ -4,8 +4,6 @@ import torch
 from torch.autograd import Variable
 from tqdm import tqdm
 
-from src.vocab import constants
-from src.utils.common import variable
 from src.utils.constants import SPECIAL_TOKENS
 
 
