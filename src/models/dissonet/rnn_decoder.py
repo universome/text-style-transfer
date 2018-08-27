@@ -4,21 +4,21 @@ from src.models.layers import Dropword
 
 
 class RNNDecoder(nn.Module):
-    def __init__(self, emb_size, hid_size, vocab_size, dropword_p=0):
+    def __init__(self, emb_size, hid_size, vocab, dropword_p=0):
         super(RNNDecoder, self).__init__()
 
         self.hid_size = hid_size
-        self.embeddings = nn.Embedding(vocab_size, emb_size)
+        self.embed = nn.Embedding(len(vocab), emb_size, padding_idx=vocab.stoi['<pad>'])
         self.dropword = Dropword(dropword_p)
         self.gru = nn.GRU(emb_size, hid_size, batch_first=True)
-        self.embs_to_logits = nn.Linear(hid_size, vocab_size)
-        # self.embs_to_logits.weight = self.embeddings.weight # Sharing weights
+        self.z_to_logits = nn.Linear(hid_size, len(vocab))
+        # self.z_to_logits.weight = self.embed.weight # Sharing weights
 
     def forward(self, z, sentences):
-        embs = self.embeddings(sentences)
+        embs = self.embed(sentences)
         embs = self.dropword(embs)
         self.gru.flatten_parameters()
         hid_states, _ = self.gru(embs, z.unsqueeze(0))
-        logits = self.embs_to_logits(hid_states)
+        logits = self.z_to_logits(hid_states)
 
         return logits
