@@ -12,11 +12,12 @@ from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
 from firelab.utils.training_utils import cudable
 
-from src.models import RNNLM
+from src.models import RNNLM, FFN
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.bleu import compute_bleu_for_sents
 from src.inference import inference
 from src.utils.data_utils import itos_many
+from src.morph import morph_chars_idx, MORPHS_SIZE
 
 
 class CharWMTrainer(BaseTrainer):
@@ -46,13 +47,15 @@ class CharWMTrainer(BaseTrainer):
             self.val_ds, self.config.batch_size, repeat=False)
 
     def init_models(self):
+        self.morph_to_z = cudable(FFN([MORPHS_SIZE, 512, self.config.hp.model_size]))
         self.lm = cudable(RNNLM(self.config.hp.model_size, self.vocab))
 
     def init_criterions(self):
         self.criterion = cross_entropy_without_pads(self.vocab)
 
     def init_optimizers(self):
-        self.optim = Adam(self.lm.parameters(), lr=self.config.hp.lr)
+        self.optim = Adam(chain(self.morph_to_z.parameters(), self.lm.parameters()),
+                          lr=self.config.hp.lr)
 
     def train_on_batch(self, batch):
         loss = self.loss_on_batch(batch)
@@ -64,7 +67,10 @@ class CharWMTrainer(BaseTrainer):
         self.writer.add_scalar('Loss/train', loss.item(), self.num_iters_done)
 
     def loss_on_batch(self, batch):
-        z = cudable(torch.zeros(batch.batch_size, self.config.hp.model_size))
+        batch.text = cudable(batch.text)
+        morphs = morph_chars_idx(batch.text, self.vocab)
+        morphs = cudable(torch.from_numpy(morphs).float())
+        z = self.morph_to_z(morphs)
         preds = self.lm(z, batch.text[:, :-1])
         loss = self.criterion(preds.view(-1, len(self.vocab)), batch.text[:, 1:].contiguous().view(-1))
 
@@ -83,9 +89,13 @@ class CharWMTrainer(BaseTrainer):
         gold = []
 
         for batch in self.val_dataloader:
+            batch.text = cudable(batch.text)
             # Trying to reconstruct from first 3 letters
+            morphs = morph_chars_idx(batch.text, self.vocab)
+            morphs = cudable(torch.from_numpy(morphs).float())
+            z = self.morph_to_z(morphs)
             embs = self.lm.embed(batch.text[:, :4])
-            _, z = self.lm.gru(embs)
+            _, z = self.lm.gru(embs, z.unsqueeze(0))
             z = z.squeeze()
             preds = inference(self.lm, z, self.vocab, max_len=30)
 
