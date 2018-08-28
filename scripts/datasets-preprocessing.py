@@ -6,6 +6,8 @@ from typing import List
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
+from utils import read_corpus, save_corpus
+
 
 def prepare_subs_for_open_nmt(data_path):
     print('Preparing subs for open-nmt')
@@ -54,19 +56,6 @@ def prepare_word_filling(corpus_data_path: str, words_data_path: str):
     save_corpus(trg, 'data/generated/classics-word-filling.trg')
 
     print('Done!')
-
-
-def read_corpus(data_path: str) -> List[str]:
-    with open(data_path) as f:
-        lines = f.read().splitlines()
-
-    return lines
-
-
-def save_corpus(corpus: List[str], path: str):
-    with open(path, 'w') as f:
-        for line in corpus:
-            f.write(line + '\n')
 
 
 def main(cmd, *args):
