@@ -33,32 +33,28 @@ class WordFillingTrainer(BaseTrainer):
         with open(data_path_src) as f: src = f.read().splitlines()
         with open(data_path_trg) as f: trg = f.read().splitlines()
 
-        text_src = Field(init_token='<bos>', eos_token='<eos>', batch_first=True)
-        text_trg = Field(init_token='<bos>', eos_token='<eos>',
-                     batch_first=True, tokenize=lambda s: list(s))
-        fields = [('src', text_src), ('trg', text_trg)]
+        text = Field(init_token='<bos>', eos_token='<eos>', batch_first=True, tokenize=lambda s: list(s))
+        fields = [('src', text), ('trg', text)]
         examples = [Example.fromlist([m,o], fields) for m,o in zip(src, trg)]
         train_exs, val_exs = train_test_split(examples,
             test_size=self.config.val_set_size, random_state=self.config.random_seed)
 
         self.train_ds, self.val_ds = Dataset(train_exs, fields), Dataset(val_exs, fields)
-        text_src.build_vocab(self.train_ds.src, max_size=self.config.hp.get('max_vocab_size'))
-        text_trg.build_vocab(self.train_ds.trg, max_size=self.config.hp.get('max_vocab_size'))
+        text.build_vocab(self.train_ds, max_size=self.config.hp.get('max_vocab_size'))
 
-        self.vocab_src, self.vocab_trg = text_src.vocab, text_trg.vocab
-        self.train_dataloader = data.BucketIterator(
-            self.train_ds, self.config.hp.batch_size, repeat=False)
-        self.val_dataloader = data.BucketIterator(
-            self.val_ds, self.config.hp.batch_size, repeat=False)
+        self.vocab = text.vocab
+        batch_size = self.config.hp.batch_size
+        self.train_dataloader = data.BucketIterator(self.train_ds, batch_size, repeat=False)
+        self.val_dataloader = data.BucketIterator(self.val_ds, batch_size, repeat=False)
 
     def init_models(self):
         size = self.config.hp.model_size
 
-        self.encoder = cudable(RNNEncoder(size, size, self.vocab_src))
-        self.decoder = cudable(RNNDecoder(size, size, self.vocab_trg))
+        self.encoder = cudable(RNNEncoder(size, size, self.vocab))
+        self.decoder = cudable(RNNDecoder(size, size, self.vocab))
 
     def init_criterions(self):
-        self.criterion = cross_entropy_without_pads(self.vocab_trg)
+        self.criterion = cross_entropy_without_pads(self.vocab)
 
     def init_optimizers(self):
         self.optim = Adam(chain(
@@ -81,7 +77,7 @@ class WordFillingTrainer(BaseTrainer):
 
         z = self.encoder(batch.src)
         preds = self.decoder(z, batch.trg[:, :-1])
-        loss = self.criterion(preds.view(-1, len(self.vocab_trg)), batch.trg[:, 1:].contiguous().view(-1))
+        loss = self.criterion(preds.view(-1, len(self.vocab)), batch.trg[:, 1:].contiguous().view(-1))
 
         return loss
 
@@ -106,15 +102,15 @@ class WordFillingTrainer(BaseTrainer):
             first_chars_embs = self.decoder.embed(batch.trg[:, :4])
             z = self.encoder(batch.src)
             z = self.decoder.gru(first_chars_embs, z.unsqueeze(0))[1].squeeze()
-            out = inference(self.decoder, z, self.vocab_trg, max_len=30)
+            out = inference(self.decoder, z, self.vocab, max_len=30)
 
             first_chars = batch.trg[:, :4].cpu().numpy().tolist()
             results = [s + p for s,p in zip(first_chars, out)]
-            results = itos_many(results, self.vocab_trg, sep='')
+            results = itos_many(results, self.vocab, sep='')
 
             generated.extend(results)
-            sources.extend(itos_many(batch.src, self.vocab_src))
-            gold.extend(itos_many(batch.trg, self.vocab_trg))
+            sources.extend(itos_many(batch.src, self.vocab, sep=''))
+            gold.extend(itos_many(batch.trg, self.vocab, sep=''))
 
         # Let's try to measure BLEU scores (not valid, but at least something)
         sents_generated = [' '.join(list(s[4:])) for s in generated]

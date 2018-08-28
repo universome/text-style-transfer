@@ -30,8 +30,8 @@ def prepare_subs_for_open_nmt(data_path):
 
 def prepare_word_filling(corpus_data_path: str, words_data_path: str):
     print('Preparing word filling')
-
     DROP = '__DROP__'
+    CONTEXT_SIZE = 3 # Limiting context for char-level encoder
 
     print('Reading data...')
     lines = read_corpus(corpus_data_path)
@@ -44,12 +44,14 @@ def prepare_word_filling(corpus_data_path: str, words_data_path: str):
         for i, t in enumerate(tokens):
             if not (t in words): continue
 
-            src.append(' '.join(tokens[:i] + [DROP] + tokens[i+1:]))
+            context_left = tokens[max(i - CONTEXT_SIZE, 0) : i]
+            context_right = tokens[i + 1 : i + CONTEXT_SIZE + 1]
+            src.append(' '.join(context_left + [DROP] + context_right))
             trg.append(t)
 
     print('Saving...')
-    save_corpus(src, 'data/generated/classics-dropped-words.src')
-    save_corpus(trg, 'data/generated/classics-dropped-words.trg')
+    save_corpus(src, 'data/generated/classics-word-filling.src')
+    save_corpus(trg, 'data/generated/classics-word-filling.trg')
 
     print('Done!')
 
