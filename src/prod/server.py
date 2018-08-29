@@ -24,6 +24,9 @@ api = UnicodeApi(app)
 
 class Style(Resource):
     def post(self):
+        if request.json is None:
+            return {'error': 'You should send me json data!'}, 400
+
         if not 'sentences' in request.json:
             return {'error': 'Your json request should inlcude `sentences`'}, 400
 
