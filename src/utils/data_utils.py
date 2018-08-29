@@ -46,3 +46,19 @@ def itos_many(seqs, vocab, should_remove_special_symbols=True, sep=' '):
     sents = [sep.join(s).replace('@@ ', '') for s in sents]
 
     return sents
+
+
+def stoi_many(sentences, vocab, sep=' '):
+    if sep == '':
+        return [[vocab.stoi[t] for t in s.split(sep)] for s in sentences]
+    else:
+        return [[vocab.stoi[t] for t in s.split(sep)] for s in sentences]
+
+
+def split(s, sep):
+    return list(s) if sep == '' else s.split(sep)
+
+
+def char_tokenize(s):
+    "Splits string into chars. We need it here to make pickle work :|"
+    return split(s, '')
