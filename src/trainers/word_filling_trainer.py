@@ -47,7 +47,7 @@ class WordFillingTrainer(BaseTrainer):
         self.text = text
         batch_size = self.config.hp.batch_size
         self.train_dataloader = data.BucketIterator(self.train_ds, batch_size, repeat=False)
-        self.val_dataloader = data.BucketIterator(self.val_ds, batch_size, repeat=False)
+        self.val_dataloader = data.BucketIterator(self.val_ds, batch_size, repeat=False, shuffle=False)
 
     def init_models(self):
         size = self.config.hp.model_size

@@ -13,7 +13,7 @@ modules:
   models: ["encoder", "decoder", "merge_z"]
   optims: ["optim"]
 checkpoint:
-  freq_epochs: 5
+  freq_epochs: 1
   pickle_attrs: ["text"]
 random_seed: 42
 early_stopping:

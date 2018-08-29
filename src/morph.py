@@ -15,15 +15,22 @@ _MORPH_ATTRS = [
     'number', 'POS', 'person', 'tense', 'transitivity',  'voice',
 ]
 
-_ATTRS_TO_SET_NAMES = [
-    'ANIMACY', 'ASPECTS', 'CASES', 'GENDERS', 'INVOLVEMENT', 'MOODS',
-    'NUMBERS', 'PARTS_OF_SPEECH', 'PERSONS', 'TENSES', 'TRANSITIVITY', 'VOICES',
-]
-
-_MORPH_ATTRS_VALS = {}
-for a, c in zip(_MORPH_ATTRS, _ATTRS_TO_SET_NAMES):
-    _MORPH_ATTRS_VALS[a] = list(getattr(morph.TagClass, c))
-    _MORPH_ATTRS_VALS[a].append(None)
+# Hardcoding possible morphological features
+# to preserve order from run to run (yes, it differs)
+_MORPH_ATTRS_VALS = {
+    'animacy': ['anim', 'inan', None],
+    'aspect': ['perf', 'impf', None],
+    'case': ['gen1', 'loc1', 'gent', 'voct', 'nomn', 'acc2', 'accs', 'datv', 'loc2', 'loct', 'ablt', 'gen2', None],
+    'gender': ['masc', 'femn', 'neut', None],
+    'involvement': ['excl', 'incl', None],
+    'mood': ['indc', 'impr', None],
+    'number': ['sing', 'plur', None],
+    'POS': ['GRND', 'ADVB', 'PRTF', 'NOUN', 'PRED', 'ADJF', 'PRTS', 'CONJ', 'INTJ', 'PREP', 'NPRO', 'INFN', 'ADJS', 'COMP', 'PRCL', 'NUMR', 'VERB', None],
+    'person': ['2per', '3per', '1per', None],
+    'tense': ['futr', 'past', 'pres', None],
+    'transitivity': ['tran', 'intr', None],
+    'voice': ['pssv', 'actv', None]
+}
 
 MORPHS_SIZE = sum(len(v) for v in _MORPH_ATTRS_VALS.values())
 
