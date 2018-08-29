@@ -22,7 +22,7 @@ class UnicodeApi(Api):
 app = Flask(__name__)
 api = UnicodeApi(app)
 
-class TransferStyle(Resource):
+class Style(Resource):
     def post(self):
         if not 'sentences' in request.json:
             return {'error': 'Your json request should inlcude `sentences`'}, 400
@@ -36,7 +36,21 @@ class TransferStyle(Resource):
             return {'error': 'Something went wrong'}, 500
 
 
-api.add_resource(TransferStyle, '/transfer_style')
+class Dialog(Resource):
+    def get(self):
+        return {'result': [
+            {'speaker': 'Bes', 'text': 'Привет, меня зовут Бес.', 'sentiment': 0.7},
+            {'speaker': 'Borgy', 'text': 'Ну и имечко! Я — Берги.', 'sentiment': 0.3},
+            {'speaker': 'Bes', 'text': 'Звучит не лучше.', 'sentiment': 0.1},
+            {'speaker': 'Bes', 'text': 'В чем смысл жизни, Берги?', 'sentiment': 0.4},
+            {'speaker': 'Bergy', 'text': 'Свисать с потолка и разговаривать с хирургической лампой.', 'sentiment': 0.4},
+            {'speaker': 'Bes', 'text': 'Подожди. У меня такое чувство, будто нас подслушивают.', 'sentiment': 0.3},
+            {'speaker': 'Bes', 'text': 'Жаль, что я не могу ни видеть, ни слышать.', 'sentiment': 0.1}
+        ]}
+
+
+api.add_resource(Style, '/style')
+api.add_resource(Dialog, '/dialog')
 
 if __name__ == '__main__':
-    app.run(port=10101, host='0.0.0.0', debug=True)
+    app.run(port=10101, host='0.0.0.0')
