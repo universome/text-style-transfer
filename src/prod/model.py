@@ -1,4 +1,5 @@
 import os
+import re
 import pickle
 import sys; sys.path.extend(['.'])
 
@@ -17,27 +18,27 @@ from src.inference import inference
 
 # Some constants
 batch_size = 128
+n_first_chars = 5
 
 # Loading vocab
-text = pickle.load(open('experiments/word-filling/checkpoints/text.pickle', 'rb'))
+text = pickle.load(open('models/text.pickle', 'rb'))
 fields = [('src', text), ('trg', text)]
 
 # Defining model
-encoder = cudable(RNNEncoder(512, 512, text.vocab))
-decoder = cudable(RNNDecoder(512, 512, text.vocab))
-merge_z = cudable(FFN([512 + MORPHS_SIZE, 512, 512]))
+encoder = cudable(RNNEncoder(512, 512, text.vocab)).eval()
+decoder = cudable(RNNDecoder(512, 512, text.vocab)).eval()
+merge_z = cudable(FFN([512 + MORPHS_SIZE, 512, 512])).eval()
 
-encoder.load_state_dict(torch.load('experiments/word-filling/checkpoints/encoder-112975.pth'))
-decoder.load_state_dict(torch.load('experiments/word-filling/checkpoints/decoder-112975.pth'))
-merge_z.load_state_dict(torch.load('experiments/word-filling/checkpoints/merge_z-112975.pth'))
-
+encoder.load_state_dict(torch.load('models/encoder-112975.pth'))
+decoder.load_state_dict(torch.load('models/decoder-112975.pth'))
+merge_z.load_state_dict(torch.load('models/merge_z-112975.pth'))
 
 def predict(sentences):
     # Splitting sentences into batches
-    src, trg = generate_batch(sentences)
+    src, trg = generate_dataset(sentences)
     examples = [Example.fromlist([m,o], fields) for m,o in zip(src, trg)]
     ds = Dataset(examples, fields)
-    dataloader = data.BucketIterator(ds, batch_size, repeat=False)
+    dataloader = data.BucketIterator(ds, batch_size, repeat=False, shuffle=False)
 
     word_translations = []
 
@@ -46,14 +47,14 @@ def predict(sentences):
         batch.src, batch.trg = cudable(batch.src), cudable(batch.trg)
         morphs = morph_chars_idx(batch.trg, text.vocab)
         morphs = cudable(torch.from_numpy(morphs).float())
+        first_chars_embs = decoder.embed(batch.trg[:, :n_first_chars])
 
         z = encoder(batch.src)
         z = merge_z(torch.cat([z, morphs], dim=1))
-        first_chars_embs = decoder.embed(batch.trg[:, :4])
         z = decoder.gru(first_chars_embs, z.unsqueeze(0))[1].squeeze()
         out = inference(decoder, z, text.vocab, max_len=30)
 
-        first_chars = batch.trg[:, :4].cpu().numpy().tolist()
+        first_chars = batch.trg[:, :n_first_chars].cpu().numpy().tolist()
         results = [s + p for s,p in zip(first_chars, out)]
         results = itos_many(results, text.vocab, sep='')
 
@@ -62,7 +63,7 @@ def predict(sentences):
     return fill_words(sentences, word_translations)
 
 
-def generate_batch(sentences):
+def generate_dataset(sentences):
     DROP = '__DROP__'
     CONTEXT_SIZE = 3
     src, trg = [], []
@@ -81,8 +82,11 @@ def generate_batch(sentences):
 
 def fill_words(sentences, words):
     lens = [len(s.split()) for s in sentences]
+    original = [w for s in sentences for w in s.split()]
 
-    assert sum(lens) == len(words)
+    assert sum(lens) == len(words) == len(original)
+
+    words = [choose_word(w,o) for w,o in zip(words, original)]
 
     w_idx = 0
     s_idx = 0
@@ -98,3 +102,16 @@ def fill_words(sentences, words):
             results[s_idx].append(w)
 
     return [' '.join(s) for s in results]
+
+
+def choose_word(translated, original):
+    if len(original) < 5:
+        return original # We do not translate short words
+
+    if not re.match(r"^([а-я]|ё)+$", original):
+        return original # Do not translate non-simple words
+
+    if not re.match(r"^([а-я]|ё)+$", translated):
+        return original # We have translated word into garbage :|
+
+    return translated
