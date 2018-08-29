@@ -10,10 +10,11 @@ val_freq_iters: 1000
 # val_freq_epochs: 1
 val_set_size: 1000
 modules:
-  models: ["encoder", "decoder"]
+  models: ["encoder", "decoder", "merge_z"]
   optims: ["optim"]
 checkpoint:
-  freq_epochs: 1
+  freq_epochs: 5
+  pickle_attrs: ["text"]
 random_seed: 42
 early_stopping:
   loss: "val_loss"
