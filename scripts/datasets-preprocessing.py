@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import  re
 import sys
 from typing import List
 
@@ -58,11 +59,26 @@ def prepare_word_filling(corpus_data_path: str, words_data_path: str):
     print('Done!')
 
 
+def filter_subs(input_data_path: str, output_data_path: str):
+    print('Reading data...')
+    subs = open(input_data_path).read().splitlines()
+    pattern = re.compile('^(?:[A-z]|[А-я]|[ёЁ\d\s.,!:?\-––\'"%$()`])+$')
+    print('Filtering...')
+    filtered = [s for s in tqdm(subs) if pattern.match(s)]
+    print('Removing too long sentences...')
+    short = [s for s in tqdm(filtered) if len(s.split()) <= 50 and len(s) <= 250]
+    print('Saving...')
+    save_corpus(short, output_data_path)
+    print('Done!')
+
+
 def main(cmd, *args):
     if cmd == 'subs-open-nmt':
         prepare_subs_for_open_nmt(*args)
     elif cmd == 'word-filling':
         prepare_word_filling(*args)
+    elif cmd == 'filter-subs':
+        filter_subs(*args)
     else:
         raise NotImplementedError
 
