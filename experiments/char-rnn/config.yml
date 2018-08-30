@@ -1,0 +1,23 @@
+title: "Character-level RNN for open subtitles"
+trainer: "CharRNNTrainer"
+data:
+  # train: "data/generated/tmp_sents"
+  # val: "data/generated/tmp_sents"
+  train: "data/subs/subs.filtered"
+  val: "data/subs/subs.filtered.val"
+max_num_epochs: 100
+val_freq_iters: 1000
+# val_freq_epochs: 1
+val_set_size: 5000
+display_k_val_examples: 10
+modules:
+  models: ["lm"]
+  optims: ["optim"]
+checkpoint:
+  freq_iters: 100000
+random_seed: 42
+hp:
+  lr: 0.001
+  model_size: 512
+  batch_size: 512
+  batch_len: 512

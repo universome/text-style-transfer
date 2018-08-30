@@ -8,6 +8,7 @@ from .lm_discriminators_trainer import LMDiscriminatorsTrainer
 from .classifier_trainer import ClassifierTrainer
 from .char_wm_trainer import CharWMTrainer
 from .word_filling_trainer import WordFillingTrainer
+from .char_rnn_trainer import CharRNNTrainer
 
 __all__ = [
     "DissoNetTrainer",
@@ -20,4 +21,5 @@ __all__ = [
     "ClassifierTrainer",
     "CharWMTrainer",
     "WordFillingTrainer",
+    "CharRNNTrainer",
 ]
