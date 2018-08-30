@@ -7,11 +7,14 @@ from firelab.utils.training_utils import cudable
 from src.utils.gumbel import gumbel_softmax_sample
 
 
-def inference(model, z, vocab, enc_mask=None, max_len=100):
+def inference(model, z, vocab, enc_mask=None, max_len=100, bos_token='<bos>', eos_token='<eos>', active_seqs=None):
     "Common inference procedure for different decoders"
     batch_size = z.size(0)
-    BOS, EOS = vocab.stoi['<bos>'], vocab.stoi['<eos>']
-    active_seqs = cudable(T.tensor([[BOS] for _ in range(batch_size)]).long())
+    BOS, EOS = vocab.stoi[bos_token], vocab.stoi[eos_token]
+
+    assert EOS != vocab.stoi['<unk>'] # TODO: BOS either?
+
+    active_seqs = active_seqs or cudable(T.tensor([[BOS] for _ in range(batch_size)]).long())
     active_seqs_idx = np.arange(batch_size)
     finished = [None for _ in range(batch_size)]
     n_finished = 0
