@@ -18,8 +18,7 @@ from src.utils.data_utils import itos_many
 from src.inference import inference
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
-from src.models.transformer import TransformerEmbedder, TransformerDecoder
-from src.models.dissonet import RNNEncoder, RNNDecoder
+from src.models.transformer import TransformerEncoder, TransformerEmbedder, TransformerDecoder
 
 
 class TransformerEmbedderTrainer(BaseTrainer):
@@ -44,21 +43,25 @@ class TransformerEmbedderTrainer(BaseTrainer):
         text.build_vocab(self.train_ds)
 
         self.vocab = text.vocab
-        self.train_dataloader = data.BucketIterator(self.train_ds, self.config.hp.batch_size, repeat=False)
+        self.train_dataloader = data.BucketIterator(
+            self.train_ds, self.config.hp.batch_size, repeat=False)
         self.val_dataloader = data.BucketIterator(self.val_ds,
             self.config.hp.batch_size, repeat=False, shuffle=False, sort=False)
 
     def init_models(self):
-        self.encoder = cudable(TransformerEmbedder(self.config.hp.n_vecs, self.config.hp.transformer, self.vocab))
+        self.encoder = cudable(TransformerEncoder(self.config.hp.transformer, self.vocab))
+        self.embedder = cudable(TransformerEmbedder(self.config.hp.transformer))
         self.decoder = cudable(TransformerDecoder(self.config.hp.transformer, self.vocab))
-        # self.encoder = cudable(RNNEncoder(512, 512, len(self.vocab)))
-        # self.decoder = cudable(RNNDecoder(512, 512, len(self.vocab)))
 
     def init_criterions(self):
         self.criterion = cross_entropy_without_pads(self.vocab)
 
     def init_optimizers(self):
-        self.optim = Adam(chain(self.encoder.parameters(), self.decoder.parameters()), lr=self.config.hp.lr)
+        self.optim = Adam(chain(
+            self.encoder.parameters(),
+            self.embedder.parameters(),
+            self.decoder.parameters(),
+        ), lr=self.config.hp.lr)
 
     def train_on_batch(self, batch):
         loss = self.loss_on_batch(batch)
@@ -70,7 +73,9 @@ class TransformerEmbedderTrainer(BaseTrainer):
         self.writer.add_scalar('train/loss', loss, self.num_iters_done)
 
     def loss_on_batch(self, batch):
-        embs = self.encoder(batch.text)
+        batch.text = cudable(batch.text)
+        encs, encs_mask = self.encoder(batch.text)
+        embs = self.embedder(encs, encs_mask)
         recs = self.decoder(embs, batch.text[:, :-1])
         loss = self.criterion(recs.view(-1, len(self.vocab)), batch.text[:, 1:].contiguous().view(-1))
 
@@ -82,8 +87,10 @@ class TransformerEmbedderTrainer(BaseTrainer):
         losses = []
 
         for batch in self.val_dataloader:
+            batch.text = cudable(batch.text)
             loss = self.loss_on_batch(batch)
-            embs = self.encoder(batch.text)
+            encs, encs_mask = self.encoder(batch.text)
+            embs = self.embedder(encs, encs_mask)
 
             recs = inference(self.decoder, embs, self.vocab)
 
