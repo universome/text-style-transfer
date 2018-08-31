@@ -13,8 +13,7 @@ from firelab import BaseTrainer
 from firelab.utils.training_utils import cudable, grad_norm, HPLinearScheme, determine_turn
 from sklearn.model_selection import train_test_split
 
-from src.models.dissonet import RNNEncoder, RNNDecoder, MergeNN
-from src.models import FFN
+from src.models import FFN, RNNEncoder, RNNDecoder
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.gan_losses import WCriticLoss, WGeneratorLoss, wgan_gp
@@ -56,28 +55,21 @@ class CycleGANTrainer(BaseTrainer):
     def init_models(self):
         emb_size = self.config.hp.emb_size
         hid_size = self.config.hp.hid_size
-        voc_size = len(self.vocab)
         dropout_p = self.config.hp.dropout
         dropword_p = self.config.hp.dropword
 
-        self.encoder = cudable(RNNEncoder(emb_size, hid_size, voc_size, dropword_p))
-        self.decoder = cudable(RNNDecoder(emb_size, hid_size, voc_size, dropword_p))
-
-        def create_gen():
-            return nn.Sequential(
-                FFN([hid_size, hid_size], dropout_p),
-                # nn.Tanh()
-            )
+        self.encoder = cudable(RNNEncoder(emb_size, hid_size, self.vocab, dropword_p))
+        self.decoder = cudable(RNNDecoder(emb_size, hid_size, self.vocab, dropword_p))
 
         def create_critic():
             return FFN([hid_size, hid_size, 1], dropout_p)
 
         # GAN from X to Y
-        self.gen_x2y = cudable(create_gen())
+        self.gen_x2y = cudable(Generator(hid_size, self.config.hp.gen_n_rec_steps))
         self.critic_y = cudable(create_critic())
 
         # GAN from Y to X
-        self.gen_y2x = cudable(create_gen())
+        self.gen_y2x = cudable(Generator(hid_size, self.config.hp.gen_n_rec_steps))
         self.critic_x = cudable(create_critic())
 
     def init_criterions(self):
@@ -156,6 +148,9 @@ class CycleGANTrainer(BaseTrainer):
         self.write_losses(ae_losses_info, prefix='TRAIN/')
 
     def ae_loss_on_batch(self, batch):
+        batch.domain_x = cudable(batch.domain_x)
+        batch.domain_y = cudable(batch.domain_y)
+
         x_hid = self.encoder(batch.domain_x)
         y_hid = self.encoder(batch.domain_y)
 
@@ -174,6 +169,9 @@ class CycleGANTrainer(BaseTrainer):
         return rec_loss, losses_info
 
     def critic_loss_on_batch(self, batch):
+        batch.domain_x = cudable(batch.domain_x)
+        batch.domain_y = cudable(batch.domain_y)
+
         x_hid = self.encoder(batch.domain_x)
         y_hid = self.encoder(batch.domain_y)
         x2y_hid = self.gen_x2y(x_hid)
@@ -200,6 +198,9 @@ class CycleGANTrainer(BaseTrainer):
         return critics_total_loss, losses_info
 
     def gen_loss_on_batch(self, batch):
+        batch.domain_x = cudable(batch.domain_x)
+        batch.domain_y = cudable(batch.domain_y)
+
         x_hid = self.encoder(batch.domain_x)
         y_hid = self.encoder(batch.domain_y)
         x2y_hid = self.gen_x2y(x_hid)
@@ -235,6 +236,9 @@ class CycleGANTrainer(BaseTrainer):
         losses = []
 
         for batch in self.val_dataloader:
+            batch.domain_x = cudable(batch.domain_x)
+            batch.domain_y = cudable(batch.domain_y)
+
             *_, rec_losses_info = self.ae_loss_on_batch(batch)
             *_, gen_losses_info = self.gen_loss_on_batch(batch)
             with torch.enable_grad():
@@ -274,6 +278,9 @@ class CycleGANTrainer(BaseTrainer):
         self.writer.add_text('Generated examples', text, self.num_iters_done)
 
     def transfer_style_on_batch(self, batch):
+        batch.domain_x = cudable(batch.domain_x)
+        batch.domain_y = cudable(batch.domain_y)
+
         x_z = self.encoder(batch.domain_x)
         y_z = self.encoder(batch.domain_y)
 
@@ -288,3 +295,17 @@ class CycleGANTrainer(BaseTrainer):
         y2y = inference(self.decoder, y2y_z, self.vocab)
 
         return x2y, y2x, x2x, y2y
+
+
+class Generator(nn.Module):
+    def __init__(self, size, n_steps):
+        super(Generator, self).__init__()
+
+        self.n_steps = n_steps
+        self.gru = nn.GRU(size, size, batch_first=True)
+
+    def forward(self, z):
+        x = z.unsqueeze(1).repeat(1, self.n_steps, 1)
+        y = self.gru(x, z.unsqueeze(0))[1].squeeze(0)
+
+        return y

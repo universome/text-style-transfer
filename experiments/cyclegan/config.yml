@@ -38,3 +38,4 @@ hp:
   min_len: 10
   max_len: 50
   noiseness: 0.01
+  gen_n_rec_steps: 3
