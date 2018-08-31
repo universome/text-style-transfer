@@ -1,6 +1,7 @@
 import os
 import math
 import random
+import pickle
 from itertools import chain
 
 import numpy as np
@@ -13,7 +14,6 @@ from firelab import BaseTrainer
 from firelab.utils.training_utils import cudable
 
 from src.models import RNNLM
-from src.inference import inference
 from src.utils.data_utils import itos_many, char_tokenize
 
 
@@ -41,6 +41,9 @@ class CharRNNTrainer(BaseTrainer):
         self.val_ds = Dataset(val_examples, [('text', self.field)])
 
         self.field.build_vocab(self.train_ds)
+
+        pickle.dump(self.field.vocab, open('experiments/char-rnn/checkpoints/vocab.pickle', 'wb'))
+        print('Pickled vocab!')
 
         self.train_dataloader = data.BPTTIterator(self.train_ds,
             self.config.hp.batch_size, self.config.hp.batch_len, repeat=False)
@@ -82,12 +85,8 @@ class CharRNNTrainer(BaseTrainer):
 
         for batch in random.sample(batches, self.config.display_k_val_examples):
             src = cudable(batch.text)
-            z = cudable(torch.zeros(1, self.config.hp.model_size))
-            embs = self.lm.embed(src)
-            z = self.lm.gru(embs, z.unsqueeze(0))[1].squeeze(0)
-            results = inference(self.lm, z, self.field.vocab, eos_token=self.eos,
-                max_len=250, active_seqs=cudable(torch.tensor([[self.field.vocab.stoi[self.eos]]])))
-            results = itos_many(results, self.field.vocab, sep='')
+            results = self.lm.inference(src.squeeze(), self.field.vocab, eos_token=self.eos, max_len=250)
+            results = itos_many([results], self.field.vocab, sep='')
 
             generated.extend(results)
             sources.extend(itos_many(batch.text, self.field.vocab, sep=''))
