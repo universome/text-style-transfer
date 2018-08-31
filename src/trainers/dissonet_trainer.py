@@ -13,8 +13,8 @@ from firelab import BaseTrainer
 from firelab.utils.training_utils import cudable, grad_norm
 from sklearn.model_selection import train_test_split
 
-from src.models.dissonet import RNNEncoder, RNNDecoder, MergeNN, SplitNN, DissoNet
-from src.models import FFN
+from src.models.dissonet import MergeNN, SplitNN, DissoNet
+from src.models import FFN, RNNEncoder, RNNDecoder
 from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads

@@ -11,7 +11,7 @@ from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
 from firelab.utils.training_utils import cudable
 
-from src.models.dissonet import RNNEncoder, RNNDecoder
+from src.models import RNNEncoder, RNNDecoder
 from src.models import FFN
 from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents

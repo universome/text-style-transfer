@@ -13,8 +13,7 @@ from firelab import BaseTrainer
 from firelab.utils.training_utils import cudable
 from sklearn.model_selection import train_test_split
 
-from src.models import FFN
-from src.models.dissonet import RNNEncoder, RNNDecoder
+from src.models import FFN, RNNEncoder, RNNDecoder
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.bleu import compute_bleu_for_sents
 from src.inference import inference

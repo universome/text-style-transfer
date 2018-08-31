@@ -9,8 +9,7 @@ from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab.utils.training_utils import cudable
 
-from src.models import FFN
-from src.models.dissonet import RNNEncoder, RNNDecoder
+from src.models import FFN, RNNEncoder, RNNDecoder
 from src.utils.data_utils import itos_many, char_tokenize
 from src.morph import morph_chars_idx, MORPHS_SIZE
 from src.inference import inference
@@ -24,14 +23,18 @@ n_first_chars = 5
 text = pickle.load(open('models/text.pickle', 'rb'))
 fields = [('src', text), ('trg', text)]
 
-# Defining model
+print('Loading models..')
 encoder = cudable(RNNEncoder(512, 512, text.vocab)).eval()
 decoder = cudable(RNNDecoder(512, 512, text.vocab)).eval()
 merge_z = cudable(FFN([512 + MORPHS_SIZE, 512, 512])).eval()
 
-encoder.load_state_dict(torch.load('models/encoder-112975.pth'))
-decoder.load_state_dict(torch.load('models/decoder-112975.pth'))
-merge_z.load_state_dict(torch.load('models/merge_z-112975.pth'))
+versions = set([int(f.split('-')[1][:-4]) for f in os.listdir('models') if '-' in f])
+latest_iter = max(versions)
+print('Latest iter (version) found: {}. Loading from it.'.format(latest_iter))
+location = None if torch.cuda.is_available() else 'cpu'
+encoder.load_state_dict(torch.load('models/encoder-{}.pth'.format(latest_iter), map_location=location))
+decoder.load_state_dict(torch.load('models/decoder-{}.pth'.format(latest_iter), map_location=location))
+merge_z.load_state_dict(torch.load('models/merge_z-{}.pth'.format(latest_iter), map_location=location))
 
 def predict(sentences):
     # Splitting sentences into batches
