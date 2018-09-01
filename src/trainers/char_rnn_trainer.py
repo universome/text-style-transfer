@@ -91,7 +91,7 @@ class CharRNNTrainer(BaseTrainer):
             generated.extend(results)
             sources.extend(itos_many(batch.text, self.field.vocab, sep=''))
 
-        texts = ['`{} => {}`'.format(s,g[1:]) for s,g in zip(sources, generated)]
+        texts = ['`{} => {}`'.format(s,g) for s,g in zip(sources, generated)]
         text = '\n\n'.join(texts)
 
         self.writer.add_text('Samples', text, self.num_iters_done)
