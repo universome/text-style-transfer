@@ -15,27 +15,21 @@ val_set_size: 500
 # val_set_size: 100
 modules:
   models: ["encoder", "decoder", "critic_x", "critic_y", "gen_x2y", "gen_y2x"]
-  optims: ["ae_optim", "critic_optim"]
+  optims: ["ae_optim", "critic_optim", "gen_optim"]
 checkpoint:
   freq_epochs: 1
 random_seed: 42
-# early_stopping:
-#   loss: "val_rec_loss"
-#   history_length: 50
-#   should_decrease: true
 hp:
-  emb_size: 1024
-  hid_size: 1024
+  model_size: 1024
   dropout: 0.1
   dropword: 0.1
   lr: 0.001
   gp_lambda: 10
   ae_pretraining_n_epochs: 1
-  loss_coefs:
-    l2: [0.05, 1., 100000.]
   grad_clip: 10
-  n_critic: 1
+  p_norm: 2
+  n_critic: 20
   min_len: 10
   max_len: 50
-  noiseness: 0.01
+  noiseness: 0.1
   gen_n_rec_steps: 3

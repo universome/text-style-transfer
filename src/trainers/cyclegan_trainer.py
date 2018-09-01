@@ -25,8 +25,6 @@ class CycleGANTrainer(BaseTrainer):
     def __init__(self, config):
         super(CycleGANTrainer, self).__init__(config)
 
-        self.losses['val_rec_loss'] = [] # Here we'll write history for early stopping
-
     def init_dataloaders(self):
         batch_size = self.config.batch_size
         project_path = self.config.firelab.project_path
@@ -53,23 +51,22 @@ class CycleGANTrainer(BaseTrainer):
         self.val_dataloader = data.BucketIterator(self.val_ds, batch_size, repeat=False, shuffle=False)
 
     def init_models(self):
-        emb_size = self.config.hp.emb_size
-        hid_size = self.config.hp.hid_size
+        size = self.config.hp.model_size
         dropout_p = self.config.hp.dropout
         dropword_p = self.config.hp.dropword
 
-        self.encoder = cudable(RNNEncoder(emb_size, hid_size, self.vocab, dropword_p))
-        self.decoder = cudable(RNNDecoder(emb_size, hid_size, self.vocab, dropword_p))
+        self.encoder = cudable(RNNEncoder(size, size, self.vocab, dropword_p, noise=self.config.hp.noiseness))
+        self.decoder = cudable(RNNDecoder(size, size, self.vocab, dropword_p))
 
         def create_critic():
-            return FFN([hid_size, hid_size, 1], dropout_p)
+            return FFN([size, size, 1], dropout_p)
 
         # GAN from X to Y
-        self.gen_x2y = cudable(Generator(hid_size, self.config.hp.gen_n_rec_steps))
+        self.gen_x2y = cudable(Generator(size, self.config.hp.gen_n_rec_steps))
         self.critic_y = cudable(create_critic())
 
         # GAN from Y to X
-        self.gen_y2x = cudable(Generator(hid_size, self.config.hp.gen_n_rec_steps))
+        self.gen_y2x = cudable(Generator(size, self.config.hp.gen_n_rec_steps))
         self.critic_x = cudable(create_critic())
 
     def init_criterions(self):
@@ -126,12 +123,20 @@ class CycleGANTrainer(BaseTrainer):
 
     def train_gen_on_batch(self, batch):
         ae_loss, ae_losses_info = self.ae_loss_on_batch(batch) # Never stop trainig AE
-        gen_loss, gen_losses_info = self.gen_loss_on_batch(batch)
+        adv_loss, lp_loss, gen_losses_info = self.gen_loss_on_batch(batch)
 
         # Generators
         self.gen_optim.zero_grad()
-        gen_loss.backward(retain_graph=True)
-        gen_grad_norm = grad_norm(self.gen_params)
+
+        if np.random.random() > 0.5:
+            adv_loss.backward(retain_graph=True)
+            gen_grad_norm = grad_norm(self.gen_params)
+            gen_losses_info['grad norm/gen_adv'] = gen_grad_norm.item()
+        else:
+            lp_loss.backward(retain_graph=True)
+            gen_grad_norm = grad_norm(self.gen_params)
+            gen_losses_info['grad norm/gen_lp'] = gen_grad_norm.item()
+
         clip_grad_norm_(self.gen_params, self.config.hp.grad_clip)
         self.gen_optim.step()
 
@@ -142,7 +147,6 @@ class CycleGANTrainer(BaseTrainer):
         clip_grad_norm_(self.ae_params, self.config.hp.grad_clip)
         self.ae_optim.step()
 
-        gen_losses_info['grad norm/gen'] = gen_grad_norm.item()
         ae_losses_info['grad norm/ae'] = ae_grad_norm.item()
         self.write_losses(gen_losses_info, prefix='TRAIN/')
         self.write_losses(ae_losses_info, prefix='TRAIN/')
@@ -208,29 +212,25 @@ class CycleGANTrainer(BaseTrainer):
         x2y2x_hid = self.gen_y2x(x2y_hid)
         y2x2y_hid = self.gen_x2y(y2x_hid)
 
-        # Generator loss (consists of making critic's life harder and l2 loss)
+        # Generator loss (consists of making critic's life harder and lp loss)
         critic_x_preds_y2x = self.critic_x(y2x_hid)
         critic_y_preds_x2y = self.critic_y(x2y_hid)
-        gen_x_loss = self.generator_criterion(critic_y_preds_x2y)
-        gen_y_loss = self.generator_criterion(critic_x_preds_y2x)
-        gen_loss = (gen_x_loss + gen_y_loss) / 2
+        adv_x_loss = self.generator_criterion(critic_y_preds_x2y)
+        adv_y_loss = self.generator_criterion(critic_x_preds_y2x)
+        adv_loss = (adv_x_loss + adv_y_loss) / 2
 
-        x_hid_l2_loss = torch.norm(x_hid - x2y2x_hid)
-        y_hid_l2_loss = torch.norm(y_hid - y2x2y_hid)
-        l2_loss = (x_hid_l2_loss + y_hid_l2_loss) / 2
-
-        # Computing coefs
-        c_l2 = HPLinearScheme(*self.config.hp.loss_coefs.l2).evaluate(self.num_iters_done)
-        gen_loss = gen_loss + c_l2 * l2_loss
+        x_hid_lp_loss = torch.norm(x_hid - x2y2x_hid, p=self.config.hp.p_norm)
+        y_hid_lp_loss = torch.norm(y_hid - y2x2y_hid, p=self.config.hp.p_norm)
+        lp_loss = (x_hid_lp_loss + y_hid_lp_loss) / 2
 
         losses_info = {
-            'gen_loss/domain_x': gen_x_loss.item(),
-            'gen_loss/domain_y': gen_y_loss.item(),
-            'l2_loss/domain_x': x_hid_l2_loss.item(),
-            'l2_loss/domain_y': y_hid_l2_loss.item(),
+            'gen_adv_loss/domain_x': adv_x_loss.item(),
+            'gen_adv_loss/domain_y': adv_y_loss.item(),
+            'gen_lp_loss/domain_x': x_hid_lp_loss.item(),
+            'gen_lp_loss/domain_y': y_hid_lp_loss.item(),
         }
 
-        return gen_loss, losses_info
+        return adv_loss, lp_loss, losses_info
 
     def validate(self):
         losses = []
