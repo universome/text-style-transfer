@@ -81,7 +81,8 @@ class CycleGANTrainer(BaseTrainer):
 
         self.ae_optim = Adam(self.ae_params, lr=self.config.hp.lr)
         self.gen_optim = Adam(self.gen_params, lr=self.config.hp.lr)
-        self.critic_optim = Adam(self.critics_params, lr=self.config.hp.lr)
+        self.critic_optim = Adam(self.critics_params,
+            lr=self.config.hp.critic_optim.lr, betas=self.config.hp.critic_optim.betas)
 
     def train_on_batch(self, batch):
         if self.num_epochs_done < self.config.hp.ae_pretraining_n_epochs:
@@ -123,20 +124,12 @@ class CycleGANTrainer(BaseTrainer):
 
     def train_gen_on_batch(self, batch):
         ae_loss, ae_losses_info = self.ae_loss_on_batch(batch) # Never stop trainig AE
-        adv_loss, lp_loss, gen_losses_info = self.gen_loss_on_batch(batch)
+        gen_loss, gen_losses_info = self.gen_loss_on_batch(batch)
 
         # Generators
         self.gen_optim.zero_grad()
-
-        if np.random.random() > 0.5:
-            adv_loss.backward(retain_graph=True)
-            gen_grad_norm = grad_norm(self.gen_params)
-            gen_losses_info['grad norm/gen_adv'] = gen_grad_norm.item()
-        else:
-            lp_loss.backward(retain_graph=True)
-            gen_grad_norm = grad_norm(self.gen_params)
-            gen_losses_info['grad norm/gen_lp'] = gen_grad_norm.item()
-
+        gen_loss.backward(retain_graph=True)
+        gen_grad_norm = grad_norm(self.gen_params)
         clip_grad_norm_(self.gen_params, self.config.hp.grad_clip)
         self.gen_optim.step()
 
@@ -147,6 +140,7 @@ class CycleGANTrainer(BaseTrainer):
         clip_grad_norm_(self.ae_params, self.config.hp.grad_clip)
         self.ae_optim.step()
 
+        gen_losses_info['grad norm/gen'] = gen_grad_norm.item()
         ae_losses_info['grad norm/ae'] = ae_grad_norm.item()
         self.write_losses(gen_losses_info, prefix='TRAIN/')
         self.write_losses(ae_losses_info, prefix='TRAIN/')
@@ -223,6 +217,9 @@ class CycleGANTrainer(BaseTrainer):
         y_hid_lp_loss = torch.norm(y_hid - y2x2y_hid, p=self.config.hp.p_norm)
         lp_loss = (x_hid_lp_loss + y_hid_lp_loss) / 2
 
+        # Total loss
+        gen_loss = adv_loss + self.config.hp.lp_loss_proportion * lp_loss
+
         losses_info = {
             'gen_adv_loss/domain_x': adv_x_loss.item(),
             'gen_adv_loss/domain_y': adv_y_loss.item(),
@@ -230,7 +227,8 @@ class CycleGANTrainer(BaseTrainer):
             'gen_lp_loss/domain_y': y_hid_lp_loss.item(),
         }
 
-        return adv_loss, lp_loss, losses_info
+
+        return gen_loss, losses_info
 
     def validate(self):
         losses = []

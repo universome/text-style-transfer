@@ -8,7 +8,7 @@ data:
   domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
   domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
 batch_size: 16
-max_num_epochs: 100
+max_num_epochs: 10
 val_freq_iters: 5000
 val_set_size: 500
 # val_freq_iters: 10
@@ -24,12 +24,16 @@ hp:
   dropout: 0.1
   dropword: 0.1
   lr: 0.001
-  gp_lambda: 10
+  gp_lambda: 5
   ae_pretraining_n_epochs: 1
   grad_clip: 10
+  lp_loss_proportion: 0.01
   p_norm: 2
   n_critic: 20
   min_len: 10
   max_len: 50
   noiseness: 0.1
   gen_n_rec_steps: 3
+  critic_optim:
+    lr: 0.001
+    betas: [0.5, 0.98]
