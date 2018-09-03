@@ -15,6 +15,7 @@ from firelab.utils.training_utils import cudable
 
 from src.models import RNNLM
 from src.utils.data_utils import itos_many, char_tokenize
+from src.optims.triangle_adam import TriangleAdam
 
 
 class CharRNNTrainer(BaseTrainer):
@@ -59,7 +60,7 @@ class CharRNNTrainer(BaseTrainer):
         self.criterion = nn.CrossEntropyLoss()
 
     def init_optimizers(self):
-        self.optim = Adam(self.lm.parameters(), lr=self.config.hp.lr)
+        self.optim = TriangleAdam(self.lm.parameters(), self.config.hp.optim)
 
     def train_on_batch(self, batch):
         loss = self.loss_on_batch(batch)

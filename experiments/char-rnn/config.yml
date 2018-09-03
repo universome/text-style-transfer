@@ -11,13 +11,19 @@ val_set_size: 5000
 display_k_val_examples: 10
 modules:
   models: ["lm"]
-  optims: ["optim"]
+  optims: [] # TODO!
 checkpoint:
   freq_epochs: 1
 random_seed: 42
 hp:
-  lr: 0.001
   model_size: 4096
   n_layers: 2
   batch_size: 128
   batch_len: 256
+  optim:
+    model_size: 256
+    factor: 1
+    warmup: 10000
+    adam:
+      lr: 0.001
+      betas: [0.98, 0.999]
