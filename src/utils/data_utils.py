@@ -62,3 +62,13 @@ def split(s, sep):
 def char_tokenize(s):
     "Splits string into chars. We need it here to make pickle work :|"
     return split(s, '')
+
+
+def k_middle_chars(word: str, k: int) -> str:
+    "Extracts k middle chars from the word"
+    if len(word) <= k: return word
+
+    left_part = word[:round(len(word) / 2)]
+    right_part = word[round(len(word) / 2):] # Right part is always longer or equal
+
+    return left_part[-(k // 2):] + right_part[: (k-1) // 2 + 1]

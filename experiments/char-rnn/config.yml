@@ -11,7 +11,6 @@ val_set_size: 5000
 display_k_val_examples: 10
 modules:
   models: ["lm"]
-  optims: [] # TODO!
 checkpoint:
   freq_epochs: 1
 random_seed: 42

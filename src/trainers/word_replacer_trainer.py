@@ -10,7 +10,7 @@ from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils.training_utils import cudable, grad_norm, determine_turn, HPLinearScheme
+from firelab.utils.training_utils import cudable, grad_norm, determine_turn, LinearScheme
 from firelab.utils.data_utils import onehot_encode
 from sklearn.model_selection import train_test_split
 
@@ -97,8 +97,8 @@ class WordReplacerTrainer(BaseTrainer):
 
         rec_loss = self.rec_crit(logits.view(-1, len(self.vocab)), batch.domain_x.contiguous().view(-1))
         gen_loss = self.gen_criterion(preds_on_fake)
-        rec_loss_coef = HPLinearScheme(*self.config.hp.loss_coefs.rec).evaluate(self.num_iters_done)
-        gen_loss_coef = HPLinearScheme(*self.config.hp.loss_coefs.gen).evaluate(self.num_iters_done)
+        rec_loss_coef = LinearScheme(*self.config.hp.loss_coefs.rec).evaluate(self.num_iters_done)
+        gen_loss_coef = LinearScheme(*self.config.hp.loss_coefs.gen).evaluate(self.num_iters_done)
         gen_total_loss = rec_loss_coef * rec_loss + gen_loss_coef * gen_loss
 
         true_onehot = onehot_encode(batch.domain_x, len(self.vocab)).float()
