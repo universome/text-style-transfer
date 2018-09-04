@@ -15,7 +15,7 @@ val_set_size: 500
 # val_set_size: 100
 modules:
   models: ["encoder", "decoder", "critic_x", "critic_y", "gen_x2y", "gen_y2x"]
-  optims: ["ae_optim", "critic_optim", "gen_optim"]
+  # optims: ["ae_optim", "critic_optim", "gen_optim"]
 checkpoint:
   freq_epochs: 1
 random_seed: 42
@@ -36,4 +36,4 @@ hp:
   gen_n_rec_steps: 3
   critic_optim:
     lr: 0.001
-    betas: [0.5, 0.98]
+    betas: [0.5, 0.999]

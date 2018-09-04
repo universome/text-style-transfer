@@ -10,7 +10,7 @@ from torch.optim import Adam
 from torchtext import data
 from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
-from firelab.utils.training_utils import cudable, grad_norm, HPLinearScheme, determine_turn
+from firelab.utils.training_utils import cudable, grad_norm, determine_turn
 from sklearn.model_selection import train_test_split
 
 from src.models import FFN, RNNEncoder, RNNDecoder
@@ -80,7 +80,7 @@ class CycleGANTrainer(BaseTrainer):
         self.critics_params = list(chain(self.critic_x.parameters(), self.critic_y.parameters()))
 
         self.ae_optim = Adam(self.ae_params, lr=self.config.hp.lr)
-        self.gen_optim = Adam(self.gen_params, lr=self.config.hp.lr)
+        self.gen_optim = Adam(chain(self.gen_params, self.encoder.parameters()), lr=self.config.hp.lr)
         self.critic_optim = Adam(self.critics_params,
             lr=self.config.hp.critic_optim.lr, betas=self.config.hp.critic_optim.betas)
 
