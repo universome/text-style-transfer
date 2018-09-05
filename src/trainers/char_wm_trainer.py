@@ -32,16 +32,17 @@ class CharWMTrainer(BaseTrainer):
         with open(data_path) as f: trg = f.read().splitlines()
         src = [k_middle_chars(w, self.config.hp.k_middle_chars) for w in trg]
 
-        self.field = Field(init_token='<bos>', eos_token='<eos>',
+        field = Field(init_token='<bos>', eos_token='<eos>',
                      batch_first=True, tokenize=char_tokenize)
-        fields = [('src', self.field), ('trg', self.field)]
+        fields = [('src', field), ('trg', field)]
         examples = [Example.fromlist(pair, fields) for pair in zip(src, trg)]
 
         dataset = Dataset(examples, fields)
         split_ratio = 1 - (self.config.val_set_size / len(trg))
         self.train_ds, self.val_ds = dataset.split(split_ratio=split_ratio)
-        self.field.build_vocab(self.train_ds)
+        field.build_vocab(self.train_ds)
 
+        self.vocab = vocab
         self.train_dataloader = data.BucketIterator(
             self.train_ds, self.config.hp.batch_size, repeat=False)
         self.val_dataloader = data.BucketIterator(
@@ -51,11 +52,11 @@ class CharWMTrainer(BaseTrainer):
         size = self.config.hp.model_size
 
         self.morph_to_z = cudable(FFN([MORPHS_SIZE + size, size]))
-        self.encoder = cudable(RNNEncoder(size, size, self.field.vocab))
-        self.decoder = cudable(RNNDecoder(size, size, self.field.vocab))
+        self.encoder = cudable(RNNEncoder(size, size, self.vocab))
+        self.decoder = cudable(RNNDecoder(size, size, self.vocab))
 
     def init_criterions(self):
-        self.criterion = cross_entropy_without_pads(self.field.vocab)
+        self.criterion = cross_entropy_without_pads(self.vocab)
 
     def init_optimizers(self):
         self.params = chain(
@@ -76,11 +77,11 @@ class CharWMTrainer(BaseTrainer):
 
     def loss_on_batch(self, batch):
         z = self.encoder(batch.src)
-        morphs = morph_chars_idx(batch.trg, self.field.vocab)
+        morphs = morph_chars_idx(batch.trg, self.vocab)
         morphs = cudable(torch.from_numpy(morphs).float())
         z = self.morph_to_z(torch.cat([z, morphs], dim=1))
         logits = self.decoder(z, batch.trg[:, :-1])
-        loss = self.criterion(logits.view(-1, len(self.field.vocab)), batch.trg[:, 1:].contiguous().view(-1))
+        loss = self.criterion(logits.view(-1, len(self.vocab)), batch.trg[:, 1:].contiguous().view(-1))
 
         return loss
 
@@ -101,20 +102,20 @@ class CharWMTrainer(BaseTrainer):
             batch = cudable(batch)
             # Trying to reconstruct from first 3 letters
             z = self.encoder(batch.src)
-            morphs = morph_chars_idx(batch.trg, self.field.vocab)
+            morphs = morph_chars_idx(batch.trg, self.vocab)
             morphs = cudable(torch.from_numpy(morphs).float())
             z = self.morph_to_z(torch.cat([z, morphs], dim=1))
             embs = self.decoder.embed(batch.trg[:, :4])
             z = self.decoder.gru(embs, z.unsqueeze(0))[1].squeeze(0)
-            preds = inference(self.decoder, z, self.field.vocab, max_len=30)
+            preds = inference(self.decoder, z, self.vocab, max_len=30)
 
             sources = batch.trg[:, :4].cpu().numpy().tolist()
             results = [s + p for s,p in zip(sources, preds)]
-            results = itos_many(results, self.field.vocab, sep='')
+            results = itos_many(results, self.vocab, sep='')
 
             generated.extend(results)
-            gold.extend(itos_many(batch.trg, self.field.vocab, sep=''))
-            conditions.extend(itos_many(batch.src, self.field.vocab, sep=''))
+            gold.extend(itos_many(batch.trg, self.vocab, sep=''))
+            conditions.extend(itos_many(batch.src, self.vocab, sep=''))
 
         # Let's try to measure BLEU scores (although it's not valid for words)
         sents_generated = [' '.join(list(s[4:])) for s in generated]

@@ -6,7 +6,7 @@ import random
 from flask import Flask, request
 from flask_restful import Resource, Api, output_json
 
-# from model import predict
+from model import predict
 from news import retrieve_random_dialog
 
 class UnicodeApi(Api):
@@ -23,21 +23,21 @@ class UnicodeApi(Api):
 app = Flask(__name__)
 api = UnicodeApi(app)
 
-# class Style(Resource):
-#     def post(self):
-#         if request.json is None:
-#             return {'error': 'You should send me json data!'}, 400
+class Style(Resource):
+    def post(self):
+        if request.json is None:
+            return {'error': 'You should send me json data!'}, 400
 
-#         if not 'sentences' in request.json:
-#             return {'error': 'Your json request should inlcude `sentences`'}, 400
+        if not 'sentences' in request.json:
+            return {'error': 'Your json request should inlcude `sentences`'}, 400
 
-#         try:
-#             # print(predict(request.json['sentences']))
-#             return {'result': predict(request.json['sentences'])}
-#         except Exception as e:
-#             print('Error occured:', e)
+        try:
+            # print(predict(request.json['sentences']))
+            return {'result': predict(request.json['sentences'])}
+        except Exception as e:
+            print('Error occured:', e)
 
-#             return {'error': 'Something went wrong'}, 500
+            return {'error': 'Something went wrong'}, 500
 
 
 class Dialog(Resource):
@@ -56,7 +56,7 @@ class Dialog(Resource):
             return {'result': retrieve_random_dialog()}
 
 
-# api.add_resource(Style, '/style')
+api.add_resource(Style, '/style')
 api.add_resource(Dialog, '/dialog')
 
 if __name__ == '__main__':
