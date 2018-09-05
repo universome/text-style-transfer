@@ -12,11 +12,11 @@ from torchtext.data import Field, Dataset, Example
 from firelab import BaseTrainer
 from firelab.utils.training_utils import cudable
 
-from src.models import RNNLM, FFN
+from src.models import RNNLM, FFN, RNNEncoder, RNNDecoder
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.bleu import compute_bleu_for_sents
 from src.inference import inference
-from src.utils.data_utils import itos_many
+from src.utils.data_utils import itos_many, char_tokenize, k_middle_chars
 from src.morph import morph_chars_idx, MORPHS_SIZE
 
 
@@ -29,33 +29,41 @@ class CharWMTrainer(BaseTrainer):
         project_path = self.config.firelab.project_path
         data_path = os.path.join(project_path, self.config.data)
 
-        with open(data_path) as f: lines = f.read().splitlines()
+        with open(data_path) as f: trg = f.read().splitlines()
+        src = [k_middle_chars(w, self.config.hp.k_middle_chars) for w in trg]
 
-        text = Field(init_token='<bos>', eos_token='<eos>',
-                     batch_first=True, tokenize=lambda s: list(s))
-        examples = [Example.fromlist([s], [('text', text)]) for s in lines]
+        self.field = Field(init_token='<bos>', eos_token='<eos>',
+                     batch_first=True, tokenize=char_tokenize)
+        fields = [('src', self.field), ('trg', self.field)]
+        examples = [Example.fromlist(pair, fields) for pair in zip(src, trg)]
 
-        dataset = Dataset(examples, [('text', text)])
-        split_ratio = 1 - (self.config.val_set_size / len(lines))
+        dataset = Dataset(examples, fields)
+        split_ratio = 1 - (self.config.val_set_size / len(trg))
         self.train_ds, self.val_ds = dataset.split(split_ratio=split_ratio)
-        text.build_vocab(self.train_ds)
+        self.field.build_vocab(self.train_ds)
 
-        self.vocab = text.vocab
         self.train_dataloader = data.BucketIterator(
-            self.train_ds, self.config.batch_size, repeat=False)
+            self.train_ds, self.config.hp.batch_size, repeat=False)
         self.val_dataloader = data.BucketIterator(
-            self.val_ds, self.config.batch_size, repeat=False)
+            self.val_ds, self.config.hp.batch_size, repeat=False)
 
     def init_models(self):
-        self.morph_to_z = cudable(FFN([MORPHS_SIZE, 512, self.config.hp.model_size]))
-        self.lm = cudable(RNNLM(self.config.hp.model_size, self.vocab))
+        size = self.config.hp.model_size
+
+        self.morph_to_z = cudable(FFN([MORPHS_SIZE + size, size]))
+        self.encoder = cudable(RNNEncoder(size, size, self.field.vocab))
+        self.decoder = cudable(RNNDecoder(size, size, self.field.vocab))
 
     def init_criterions(self):
-        self.criterion = cross_entropy_without_pads(self.vocab)
+        self.criterion = cross_entropy_without_pads(self.field.vocab)
 
     def init_optimizers(self):
-        self.optim = Adam(chain(self.morph_to_z.parameters(), self.lm.parameters()),
-                          lr=self.config.hp.lr)
+        self.params = chain(
+            self.morph_to_z.parameters(),
+            self.encoder.parameters(),
+            self.decoder.parameters(),
+        )
+        self.optim = Adam(self.params, lr=self.config.hp.lr)
 
     def train_on_batch(self, batch):
         loss = self.loss_on_batch(batch)
@@ -67,17 +75,17 @@ class CharWMTrainer(BaseTrainer):
         self.writer.add_scalar('Loss/train', loss.item(), self.num_iters_done)
 
     def loss_on_batch(self, batch):
-        batch.text = cudable(batch.text)
-        morphs = morph_chars_idx(batch.text, self.vocab)
+        z = self.encoder(batch.src)
+        morphs = morph_chars_idx(batch.trg, self.field.vocab)
         morphs = cudable(torch.from_numpy(morphs).float())
-        z = self.morph_to_z(morphs)
-        preds = self.lm(z, batch.text[:, :-1])
-        loss = self.criterion(preds.view(-1, len(self.vocab)), batch.text[:, 1:].contiguous().view(-1))
+        z = self.morph_to_z(torch.cat([z, morphs], dim=1))
+        logits = self.decoder(z, batch.trg[:, :-1])
+        loss = self.criterion(logits.view(-1, len(self.field.vocab)), batch.trg[:, 1:].contiguous().view(-1))
 
         return loss
 
     def validate(self):
-        losses = [self.loss_on_batch(b).item() for b in self.val_dataloader]
+        losses = [self.loss_on_batch(cudable(b)).item() for b in self.val_dataloader]
 
         self.writer.add_scalar('Loss/val', np.mean(losses), self.num_iters_done)
         self.losses['val_loss'].append(np.mean(losses))
@@ -87,24 +95,26 @@ class CharWMTrainer(BaseTrainer):
     def validate_inference(self):
         generated = []
         gold = []
+        conditions = []
 
         for batch in self.val_dataloader:
-            batch.text = cudable(batch.text)
+            batch = cudable(batch)
             # Trying to reconstruct from first 3 letters
-            morphs = morph_chars_idx(batch.text, self.vocab)
+            z = self.encoder(batch.src)
+            morphs = morph_chars_idx(batch.trg, self.field.vocab)
             morphs = cudable(torch.from_numpy(morphs).float())
-            z = self.morph_to_z(morphs)
-            embs = self.lm.embed(batch.text[:, :4])
-            _, z = self.lm.gru(embs, z.unsqueeze(0))
-            z = z.squeeze()
-            preds = inference(self.lm, z, self.vocab, max_len=30)
+            z = self.morph_to_z(torch.cat([z, morphs], dim=1))
+            embs = self.decoder.embed(batch.trg[:, :4])
+            z = self.decoder.gru(embs, z.unsqueeze(0))[1].squeeze(0)
+            preds = inference(self.decoder, z, self.field.vocab, max_len=30)
 
-            sources = batch.text[:, :4].cpu().numpy().tolist()
+            sources = batch.trg[:, :4].cpu().numpy().tolist()
             results = [s + p for s,p in zip(sources, preds)]
-            results = itos_many(results, self.vocab, sep='')
+            results = itos_many(results, self.field.vocab, sep='')
 
             generated.extend(results)
-            gold.extend(itos_many(batch.text, self.vocab, sep=''))
+            gold.extend(itos_many(batch.trg, self.field.vocab, sep=''))
+            conditions.extend(itos_many(batch.src, self.field.vocab, sep=''))
 
         # Let's try to measure BLEU scores (although it's not valid for words)
         sents_generated = [' '.join(list(s[4:])) for s in generated]
@@ -112,7 +122,7 @@ class CharWMTrainer(BaseTrainer):
         bleu = compute_bleu_for_sents(sents_generated, sents_gold)
         self.writer.add_scalar('BLEU', bleu, self.num_iters_done)
 
-        texts = ['{} ({}) => {}'.format(g[:3],g,p) for p,g in zip(generated, gold)]
+        texts = ['{} ({} | {}) => {}'.format(g[:3],c,g,p) for p,g,c in zip(generated, gold, conditions)]
         texts = random.sample(texts, 10) # Limiting amount of displayed text
         text = '\n\n'.join(texts)
 
