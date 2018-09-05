@@ -61,7 +61,7 @@ def prepare_word_filling(corpus_data_path: str, words_data_path: str):
 
 def filter_subs(input_data_path: str, output_data_path: str):
     print('Reading data...')
-    subs = open(input_data_path).read().splitlines()
+    subs = read_corpus(input_data_path)
     pattern = re.compile('^(?:[A-z]|[А-я]|[ёЁ\d\s.,!:?\-––\'"%$()`])+$')
     print('Filtering...')
     filtered = [s for s in tqdm(subs) if pattern.match(s)]
@@ -72,6 +72,36 @@ def filter_subs(input_data_path: str, output_data_path: str):
     print('Done!')
 
 
+def filter_dialogs_in_classics(input_data_path: str, output_data_path: str):
+    SPEC_DASH = '–' # Medium dash char
+
+    def filter_direct_speech(s):
+        parts = s.split(SPEC_DASH)
+        s =  ' '.join([parts[i] for i in range(len(parts)) if i % 2 == 1]).strip()
+        s = s if s[-1] != ',' else s[:-1] + '.' # Replacing last ',' with '.'
+
+        return s
+
+    print('Reading data...')
+    classics = read_corpus(input_data_path)
+
+    print('Finding dialogs...')
+    dialogs = [s for s in tqdm(classics) if s.strip().startswith(SPEC_DASH)]
+
+    print('Removing markup chars from dialogs...')
+    dialogs = [s.replace('\xa0', ' ') for s in tqdm(dialogs)]
+
+    print('Removing degenerate lines...')
+    dialogs = [s for s in tqdm(dialogs) if s != SPEC_DASH]
+
+    print('Filtering direct speech...')
+    dialogs = [filter_direct_speech(s) for s in tqdm(dialogs)]
+
+    print('Saving...')
+    save_corpus(dialogs, output_data_path)
+    print('Done!')
+
+
 def main(cmd, *args):
     if cmd == 'subs-open-nmt':
         prepare_subs_for_open_nmt(*args)
@@ -79,6 +109,8 @@ def main(cmd, *args):
         prepare_word_filling(*args)
     elif cmd == 'filter-subs':
         filter_subs(*args)
+    elif cmd == 'filter-dialogs-in-classics':
+        filter_dialogs_in_classics(*args)
     else:
         raise NotImplementedError
 
