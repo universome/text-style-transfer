@@ -33,19 +33,17 @@ class CharRNNTrainer(BaseTrainer):
         data_val = open(data_path_val).read().splitlines()[:self.config.val_set_size]
 
         self.eos = '|'
-        self.field = Field(eos_token=self.eos, batch_first=True, tokenize=char_tokenize)
+        field = Field(eos_token=self.eos, batch_first=True, tokenize=char_tokenize)
 
-        train_examples = [Example.fromlist([self.eos.join(data_train)], [('text', self.field)])]
-        val_examples = [Example.fromlist([s], [('text', self.field)]) for s in data_val]
+        train_examples = [Example.fromlist([self.eos.join(data_train)], [('text', field)])]
+        val_examples = [Example.fromlist([s], [('text', field)]) for s in data_val]
 
-        self.train_ds = Dataset(train_examples, [('text', self.field)])
-        self.val_ds = Dataset(val_examples, [('text', self.field)])
+        self.train_ds = Dataset(train_examples, [('text', field)])
+        self.val_ds = Dataset(val_examples, [('text', field)])
 
-        self.field.build_vocab(self.train_ds)
+        field.build_vocab(self.train_ds)
 
-        pickle.dump(self.field.vocab, open('experiments/char-rnn/checkpoints/vocab.pickle', 'wb'))
-        print('Pickled vocab!')
-
+        self.vocab = field.vocab
         self.train_dataloader = data.BPTTIterator(self.train_ds,
             self.config.hp.batch_size, self.config.hp.batch_len, repeat=False)
         self.val_dataloader = data.BucketIterator(
@@ -54,7 +52,7 @@ class CharRNNTrainer(BaseTrainer):
         print('Dataloaders initialized!')
 
     def init_models(self):
-        self.lm = cudable(RNNLM(self.config.hp.model_size, self.field.vocab))
+        self.lm = cudable(RNNLM(self.config.hp.model_size, self.vocab))
 
     def init_criterions(self):
         self.criterion = nn.CrossEntropyLoss()
@@ -75,7 +73,7 @@ class CharRNNTrainer(BaseTrainer):
         batch.text = cudable(batch.text).transpose(0,1)
         z = cudable(torch.zeros(batch.batch_size, self.config.hp.model_size))
         preds = self.lm(z, batch.text[:, :-1])
-        loss = self.criterion(preds.view(-1, len(self.field.vocab)), batch.text[:, 1:].contiguous().view(-1))
+        loss = self.criterion(preds.view(-1, len(self.vocab)), batch.text[:, 1:].contiguous().view(-1))
 
         return loss
 
@@ -86,11 +84,11 @@ class CharRNNTrainer(BaseTrainer):
 
         for batch in random.sample(batches, self.config.display_k_val_examples):
             src = cudable(batch.text)
-            results = self.lm.inference(src.squeeze(), self.field.vocab, eos_token=self.eos, max_len=250)
-            results = itos_many([results], self.field.vocab, sep='')
+            results = self.lm.inference(src.squeeze(), self.vocab, eos_token=self.eos, max_len=250)
+            results = itos_many([results], self.vocab, sep='')
 
             generated.extend(results)
-            sources.extend(itos_many(batch.text, self.field.vocab, sep=''))
+            sources.extend(itos_many(batch.text, self.vocab, sep=''))
 
         texts = ['`{} => {}`'.format(s,g) for s,g in zip(sources, generated)]
         text = '\n\n'.join(texts)
