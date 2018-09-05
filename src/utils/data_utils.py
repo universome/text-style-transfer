@@ -4,7 +4,7 @@ import torch
 from torch.autograd import Variable
 from tqdm import tqdm
 
-from src.utils.constants import SPECIAL_TOKENS
+from src.utils.constants import SPECIAL_TOKENS, PREFIXES
 
 
 def load_embeddings(embeddings_path):
@@ -72,3 +72,12 @@ def k_middle_chars(word: str, k: int) -> str:
     right_part = word[round(len(word) / 2):] # Right part is always longer or equal
 
     return left_part[-(k // 2):] + right_part[: (k-1) // 2 + 1]
+
+
+def word_base(word: str, k: int) -> str:
+    "Extracts word base for ru lang veeeery heuristically :|"
+    for p in PREFIXES:
+        if word.startswith(p):
+            return word[len(p) : len(p) + k]
+
+    return word[:k]

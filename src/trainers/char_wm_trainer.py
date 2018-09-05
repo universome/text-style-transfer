@@ -16,7 +16,7 @@ from src.models import RNNLM, FFN, RNNEncoder, RNNDecoder
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.bleu import compute_bleu_for_sents
 from src.inference import inference
-from src.utils.data_utils import itos_many, char_tokenize, k_middle_chars
+from src.utils.data_utils import itos_many, char_tokenize, word_base
 from src.morph import morph_chars_idx, MORPHS_SIZE
 
 
@@ -30,7 +30,7 @@ class CharWMTrainer(BaseTrainer):
         data_path = os.path.join(project_path, self.config.data)
 
         with open(data_path) as f: trg = f.read().splitlines()
-        src = [k_middle_chars(w, self.config.hp.k_middle_chars) for w in trg]
+        src = [word_base(w, self.config.hp.word_base_size) for w in trg]
 
         field = Field(init_token='<bos>', eos_token='<eos>',
                      batch_first=True, tokenize=char_tokenize)
@@ -42,7 +42,7 @@ class CharWMTrainer(BaseTrainer):
         self.train_ds, self.val_ds = dataset.split(split_ratio=split_ratio)
         field.build_vocab(self.train_ds)
 
-        self.vocab = vocab
+        self.vocab = field.vocab
         self.train_dataloader = data.BucketIterator(
             self.train_ds, self.config.hp.batch_size, repeat=False)
         self.val_dataloader = data.BucketIterator(
@@ -51,7 +51,7 @@ class CharWMTrainer(BaseTrainer):
     def init_models(self):
         size = self.config.hp.model_size
 
-        self.morph_to_z = cudable(FFN([MORPHS_SIZE + size, size]))
+        self.merge_z = cudable(FFN([MORPHS_SIZE + size, size]))
         self.encoder = cudable(RNNEncoder(size, size, self.vocab))
         self.decoder = cudable(RNNDecoder(size, size, self.vocab))
 
@@ -60,7 +60,7 @@ class CharWMTrainer(BaseTrainer):
 
     def init_optimizers(self):
         self.params = chain(
-            self.morph_to_z.parameters(),
+            self.merge_z.parameters(),
             self.encoder.parameters(),
             self.decoder.parameters(),
         )
@@ -79,7 +79,7 @@ class CharWMTrainer(BaseTrainer):
         z = self.encoder(batch.src)
         morphs = morph_chars_idx(batch.trg, self.vocab)
         morphs = cudable(torch.from_numpy(morphs).float())
-        z = self.morph_to_z(torch.cat([z, morphs], dim=1))
+        z = self.merge_z(torch.cat([z, morphs], dim=1))
         logits = self.decoder(z, batch.trg[:, :-1])
         loss = self.criterion(logits.view(-1, len(self.vocab)), batch.trg[:, 1:].contiguous().view(-1))
 
@@ -104,7 +104,7 @@ class CharWMTrainer(BaseTrainer):
             z = self.encoder(batch.src)
             morphs = morph_chars_idx(batch.trg, self.vocab)
             morphs = cudable(torch.from_numpy(morphs).float())
-            z = self.morph_to_z(torch.cat([z, morphs], dim=1))
+            z = self.merge_z(torch.cat([z, morphs], dim=1))
             embs = self.decoder.embed(batch.trg[:, :4])
             z = self.decoder.gru(embs, z.unsqueeze(0))[1].squeeze(0)
             preds = inference(self.decoder, z, self.vocab, max_len=30)

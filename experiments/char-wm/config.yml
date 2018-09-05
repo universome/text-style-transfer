@@ -7,10 +7,11 @@ max_num_epochs: 100
 val_freq_epochs: 1
 val_set_size: 1000
 modules:
-  models: ["encoder", "decoder", "morph_to_z"]
+  models: ["encoder", "decoder", "merge_z"]
   optims: ["optim"]
 checkpoint:
   freq_epochs: 1
+  pickle: ["vocab"]
 random_seed: 42
 early_stopping:
   loss: "val_loss"
@@ -20,4 +21,4 @@ hp:
   batch_size: 512
   lr: 0.001
   model_size: 512
-  k_middle_chars: 4
+  word_base_size: 4
