@@ -2,6 +2,7 @@
 
 import json
 import random
+import traceback
 
 from flask import Flask, request
 from flask_restful import Resource, Api, output_json
@@ -32,10 +33,9 @@ class Style(Resource):
             return {'error': 'Your json request should inlcude `sentences`'}, 400
 
         try:
-            # print(predict(request.json['sentences']))
             return {'result': predict(request.json['sentences'])}
-        except Exception as e:
-            print('Error occured:', e)
+        except Exception:
+            traceback.print_exc()
 
             return {'error': 'Something went wrong'}, 500
 
