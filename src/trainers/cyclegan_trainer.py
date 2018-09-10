@@ -26,7 +26,6 @@ class CycleGANTrainer(BaseTrainer):
         super(CycleGANTrainer, self).__init__(config)
 
     def init_dataloaders(self):
-        batch_size = self.config.batch_size
         project_path = self.config.firelab.project_path
         domain_x_data_path = os.path.join(project_path, self.config.data.domain_x)
         domain_y_data_path = os.path.join(project_path, self.config.data.domain_y)
@@ -47,6 +46,7 @@ class CycleGANTrainer(BaseTrainer):
         text.build_vocab(self.train_ds, max_size=self.config.hp.get('max_vocab_size'))
 
         self.vocab = text.vocab
+        batch_size = self.config.hp.batch_size
         self.train_dataloader = data.BucketIterator(self.train_ds, batch_size, repeat=False)
         self.val_dataloader = data.BucketIterator(self.val_ds, batch_size, repeat=False, shuffle=False)
 
@@ -218,7 +218,7 @@ class CycleGANTrainer(BaseTrainer):
         lp_loss = (x_hid_lp_loss + y_hid_lp_loss) / 2
 
         # Total loss
-        gen_loss = adv_loss + self.config.hp.lp_loss_proportion * lp_loss
+        gen_loss = adv_loss + self.config.hp.lp_loss_coef * lp_loss
 
         losses_info = {
             'gen_adv_loss/domain_x': adv_x_loss.item(),

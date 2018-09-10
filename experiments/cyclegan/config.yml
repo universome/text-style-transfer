@@ -7,9 +7,8 @@ data:
   # domain_y: "data/shakespeare/original.tok"
   domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
   domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
-batch_size: 16
-max_num_epochs: 10
-val_freq_iters: 5000
+max_num_epochs: 30
+val_freq_epochs: 1
 val_set_size: 500
 # val_freq_iters: 10
 # val_set_size: 100
@@ -21,17 +20,18 @@ checkpoint:
 random_seed: 42
 hp:
   model_size: 1024
+  batch_size: 128
   dropout: 0.1
   dropword: 0.1
   lr: 0.001
-  gp_lambda: 5
+  gp_lambda: 10
   ae_pretraining_n_epochs: 1
   grad_clip: 10
-  lp_loss_proportion: 0.01
+  lp_loss_coef: 0.001
   p_norm: 2
   n_critic: 20
-  min_len: 10
-  max_len: 50
+  min_len: 5
+  max_len: 10
   noiseness: 0.1
   gen_n_rec_steps: 3
   critic_optim:
