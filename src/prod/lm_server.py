@@ -12,20 +12,19 @@ os.chdir(LM_DIR) # We need to chdir into it to make dost_voc.txt visible
 from dost_infer import continue_dialog
 print(continue_dialog('Привееет', 3))
 
-# class UnicodeApi(Api):
-#     def __init__(self, *args, **kwargs):
-#         super(UnicodeApi, self).__init__(*args, **kwargs)
-#         self.app.config['RESTFUL_JSON'] = {
-#             'ensure_ascii': False
-#         }
-#         self.representations = {
-#             'application/json; charset=utf-8': output_json,
-#         }
+class UnicodeApi(Api):
+    def __init__(self, *args, **kwargs):
+        super(UnicodeApi, self).__init__(*args, **kwargs)
+        self.app.config['RESTFUL_JSON'] = {
+            'ensure_ascii': False
+        }
+        self.representations = {
+            'application/json; charset=utf-8': output_json,
+        }
 
 
 app = Flask(__name__)
-# api = UnicodeApi(app)
-api = Api(app)
+api = UnicodeApi(app)
 
 class Dialog(Resource):
     def post(self):
@@ -59,5 +58,4 @@ class Dialog(Resource):
 api.add_resource(Dialog, '/dialog')
 
 if __name__ == '__main__':
-    app.run(port=10104, host='0.0.0.0')
-
+    app.run(port=10103, host='0.0.0.0', threaded=False)
