@@ -7,7 +7,7 @@ import traceback
 from flask import Flask, request
 from flask_restful import Resource, Api, output_json
 
-from model import predict
+from style_model import predict as restyle
 from news import retrieve_random_dialog
 
 class UnicodeApi(Api):
@@ -33,7 +33,7 @@ class Style(Resource):
             return {'error': 'Your json request should inlcude `sentences`'}, 400
 
         try:
-            return {'result': predict(request.json['sentences'])}
+            return {'result': restyle(request.json['sentences'])}
         except Exception:
             traceback.print_exc()
 
