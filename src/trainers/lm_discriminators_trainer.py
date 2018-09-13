@@ -16,7 +16,7 @@ from firelab.utils.data_utils import filter_sents_by_len
 from sklearn.model_selection import train_test_split
 
 from src.utils.data_utils import itos_many
-from src.inference import inference, gumbel_inference
+from src.inference import InferenceState
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.gan_losses import DiscriminatorLoss
@@ -161,7 +161,14 @@ class LMDiscriminatorsTrainer(BaseTrainer):
         embs = T.cat((embs, style_emb.repeat(embs.size(0), 1, 1)), dim=1)
 
         lens = [s.cpu().numpy().tolist().index(self.vocab.stoi['<eos>']) + 1 for s in text]
-        preds = gumbel_inference(self.decoder, embs, self.vocab, lens)
+        preds = InferenceState({
+            'model': self.decoder,
+            'gumbel': True,
+            'inputs': embs,
+            'vocab': self.vocab,
+            'should_stack_finished': True,
+            'max_len': max(lens) # TODO: put back individual max lens!
+        })
 
         lm_preds = lm(preds[:, :-1], onehot=False)
         lm_preds = F.softmax(lm_preds, dim=2)

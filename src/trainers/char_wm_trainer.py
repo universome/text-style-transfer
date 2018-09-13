@@ -15,7 +15,7 @@ from firelab.utils.training_utils import cudable
 from src.models import RNNLM, FFN, RNNEncoder, RNNDecoder
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.bleu import compute_bleu_for_sents
-from src.inference import inference
+from src.inference import simple_inference
 from src.utils.data_utils import itos_many, char_tokenize, word_base
 from src.morph import morph_chars_idx, MORPHS_SIZE
 
@@ -107,7 +107,7 @@ class CharWMTrainer(BaseTrainer):
             z = self.merge_z(torch.cat([z, morphs], dim=1))
             embs = self.decoder.embed(batch.trg[:, :4])
             z = self.decoder.gru(embs, z.unsqueeze(0))[1].squeeze(0)
-            preds = inference(self.decoder, z, self.vocab, max_len=30)
+            preds = simple_inference(self.decoder, z, self.vocab, max_len=30)
 
             sources = batch.trg[:, :4].cpu().numpy().tolist()
             results = [s + p for s,p in zip(sources, preds)]

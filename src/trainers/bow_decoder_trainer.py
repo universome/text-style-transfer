@@ -17,7 +17,7 @@ from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.gan_losses import WCriticLoss
-from src.inference import inference
+from src.inference import simple_inference
 
 
 class BowDecoderTrainer(BaseTrainer):
@@ -91,7 +91,7 @@ class BowDecoderTrainer(BaseTrainer):
 
             # BLEU
             embs = self.embed(sents_to_bow(batch.text, len(self.vocab)))
-            preds = inference(self.decoder, embs, self.vocab)
+            preds = simple_inference(self.decoder, embs, self.vocab)
             preds = itos_many(preds, self.vocab)
             gold = itos_many(batch.text[:, 1:], self.vocab)
             bleu = compute_bleu_for_sents(preds, gold)

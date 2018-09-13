@@ -15,7 +15,7 @@ from firelab.utils.data_utils import filter_sents_by_len
 from sklearn.model_selection import train_test_split
 
 from src.utils.data_utils import itos_many
-from src.inference import inference
+from src.inference import simple_inference
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.models.transformer import TransformerEncoder, TransformerEmbedder, TransformerDecoder
@@ -92,7 +92,7 @@ class TransformerEmbedderTrainer(BaseTrainer):
             encs, encs_mask = self.encoder(batch.text)
             embs = self.embedder(encs, encs_mask)
 
-            recs = inference(self.decoder, embs, self.vocab)
+            recs = simple_inference(self.decoder, embs, self.vocab)
 
             recs = itos_many(recs, self.vocab)
             gold = itos_many(batch.text, self.vocab)

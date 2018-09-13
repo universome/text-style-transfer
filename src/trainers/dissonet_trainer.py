@@ -19,7 +19,7 @@ from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.gan_losses import WCriticLoss, DiscriminatorLoss, wgan_gp
-from src.inference import inference
+from src.inference import simple_inference
 from src.utils.style_transfer import transfer_style, get_text_from_sents
 
 
@@ -204,9 +204,9 @@ class DissoNetTrainer(BaseTrainer):
         state_x2x = self.merge_nn(content_x, style_x)
         state_y2y = self.merge_nn(content_y, style_y)
 
-        x2y = inference(self.decoder, state_x2y, self.vocab)
-        y2x = inference(self.decoder, state_y2x, self.vocab)
-        x2x = inference(self.decoder, state_x2x, self.vocab)
-        y2y = inference(self.decoder, state_y2y, self.vocab)
+        x2y = simple_inference(self.decoder, state_x2y, self.vocab)
+        y2x = simple_inference(self.decoder, state_y2x, self.vocab)
+        x2x = simple_inference(self.decoder, state_x2x, self.vocab)
+        y2y = simple_inference(self.decoder, state_y2y, self.vocab)
 
         return x2y, y2x, x2x, y2y

@@ -16,7 +16,7 @@ from sklearn.model_selection import train_test_split
 from src.models import FFN, RNNEncoder, RNNDecoder
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.bleu import compute_bleu_for_sents
-from src.inference import inference
+from src.inference import simple_inference
 from src.utils.data_utils import itos_many, char_tokenize
 from src.morph import morph_chars_idx, MORPHS_SIZE
 
@@ -115,7 +115,7 @@ class WordFillingTrainer(BaseTrainer):
             z = self.encoder(batch.src)
             z = self.merge_z(torch.cat([z, morphs], dim=1))
             z = self.decoder.gru(first_chars_embs, z.unsqueeze(0))[1].squeeze()
-            out = inference(self.decoder, z, self.text.vocab, max_len=30)
+            out = simple_inference(self.decoder, z, self.text.vocab, max_len=30)
 
             first_chars = batch.trg[:, :4].cpu().numpy().tolist()
             results = [s + p for s,p in zip(first_chars, out)]

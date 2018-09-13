@@ -5,7 +5,7 @@ data:
   # val: "data/generated/tmp_sents"
   train: "data/generated/classic-dialogs.txt"
   val: "data/subs/subs.filtered.val"
-max_num_epochs: 100
+max_num_epochs: 200
 val_freq_iters: 1000
 val_set_size: 5000
 display_k_val_examples: 10

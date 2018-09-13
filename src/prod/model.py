@@ -14,7 +14,7 @@ from firelab.utils.training_utils import cudable
 from src.models import FFN, RNNEncoder, RNNDecoder
 from src.utils.data_utils import itos_many, char_tokenize, word_base
 from src.morph import morph_chars_idx, MORPHS_SIZE
-from src.inference import inference
+from src.inference import simple_inference
 
 
 # Some constants
@@ -65,7 +65,7 @@ def predict(lines):
         z = encoder(batch.src)
         z = merge_z(torch.cat([z, morphs], dim=1))
         z = decoder.gru(first_chars_embs, z.unsqueeze(0))[1].squeeze()
-        out = inference(decoder, z, field.vocab, max_len=30)
+        out = simple_inference(decoder, z, field.vocab, max_len=30)
 
         first_chars = batch.trg[:, :n_first_chars].cpu().numpy().tolist()
         results = [s + p for s,p in zip(first_chars, out)]

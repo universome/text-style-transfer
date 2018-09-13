@@ -17,8 +17,9 @@ from src.models import FFN, RNNEncoder, RNNDecoder
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.gan_losses import WCriticLoss, WGeneratorLoss, wgan_gp
-from src.inference import inference
+from src.inference import simple_inference
 from src.utils.style_transfer import transfer_style, get_text_from_sents
+from src.seq_noise import seq_noise
 
 
 class CycleGANTrainer(BaseTrainer):
@@ -36,19 +37,20 @@ class CycleGANTrainer(BaseTrainer):
         domain_x = [s for s in domain_x if self.config.hp.min_len <= len(s.split()) <= self.config.hp.max_len]
         domain_y = [s for s in domain_y if self.config.hp.min_len <= len(s.split()) <= self.config.hp.max_len]
 
-        text = Field(init_token='<bos>', eos_token='<eos>', batch_first=True)
-        fields = [('domain_x', text), ('domain_y', text)]
-        examples = [Example.fromlist([m,o], fields) for m,o in zip(domain_x, domain_y)]
+        field = Field(init_token='<bos>', eos_token='<eos>', batch_first=True)
+        field_noised = Field(init_token='<bos>', eos_token='<eos>', batch_first=True, preprocessing=seq_noise)
+
+        fields = [('domain_x', field), ('domain_y', field), ('domain_x_noised', field_noised)]
+        examples = [Example.fromlist([x,y,x], fields) for x,y in zip(domain_x, domain_y)]
         train_exs, val_exs = train_test_split(examples, test_size=self.config.val_set_size,
                                               random_state=self.config.random_seed)
 
-        self.train_ds, self.val_ds = Dataset(train_exs, fields), Dataset(val_exs, fields)
-        text.build_vocab(self.train_ds, max_size=self.config.hp.get('max_vocab_size'))
+        train_ds, val_ds = Dataset(train_exs, fields), Dataset(val_exs, fields)
+        field.build_vocab(train_ds, max_size=self.config.hp.get('max_vocab_size'))
 
-        self.vocab = text.vocab
-        batch_size = self.config.hp.batch_size
-        self.train_dataloader = data.BucketIterator(self.train_ds, batch_size, repeat=False)
-        self.val_dataloader = data.BucketIterator(self.val_ds, batch_size, repeat=False, shuffle=False)
+        self.vocab = field.vocab
+        self.train_dataloader = data.BucketIterator(train_ds, self.config.hp.batch_size, repeat=False)
+        self.val_dataloader = data.BucketIterator(val_ds, self.config.hp.batch_size, repeat=False, shuffle=False)
 
     def init_models(self):
         size = self.config.hp.model_size
@@ -227,7 +229,6 @@ class CycleGANTrainer(BaseTrainer):
             'gen_lp_loss/domain_y': y_hid_lp_loss.item(),
         }
 
-
         return gen_loss, losses_info
 
     def validate(self):
@@ -287,10 +288,10 @@ class CycleGANTrainer(BaseTrainer):
         x2x_z = self.gen_y2x(x2y_z)
         y2y_z = self.gen_x2y(y2x_z)
 
-        x2y = inference(self.decoder, x2y_z, self.vocab)
-        y2x = inference(self.decoder, y2x_z, self.vocab)
-        x2x = inference(self.decoder, x2x_z, self.vocab)
-        y2y = inference(self.decoder, y2y_z, self.vocab)
+        x2y = simple_inference(self.decoder, x2y_z, self.vocab)
+        y2x = simple_inference(self.decoder, y2x_z, self.vocab)
+        x2x = simple_inference(self.decoder, x2x_z, self.vocab)
+        y2y = simple_inference(self.decoder, y2y_z, self.vocab)
 
         return x2y, y2x, x2x, y2y
 

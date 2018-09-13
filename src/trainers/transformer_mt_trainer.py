@@ -14,7 +14,7 @@ from src.models.transformer import Transformer
 from src.utils.data_utils import itos_many
 from src.losses.bleu import compute_bleu_for_sents
 from src.losses.ce_without_pads import cross_entropy_without_pads
-from src.inference import inference
+from src.inference import InferenceState
 from src.models.transformer.utils import pad_mask, subsequent_mask
 
 from torch.autograd import Variable
@@ -89,7 +89,13 @@ class TransformerMTTrainer(BaseTrainer):
 
             # BLEU
             encs, enc_mask = self.transformer.encoder(batch.src)
-            preds = inference(self.transformer.decoder, encs, self.vocab_trg, enc_mask, max_len=50)
+            preds = InferenceState({
+                'model': self.transformer.decoder,
+                'inputs': encs,
+                'enc_mask': enc_mask,
+                'vocab': self.vocab_trg,
+                'max_len': 50
+            }).inference()
             preds = itos_many(preds, self.vocab_trg)
             gold = itos_many(batch.trg, self.vocab_trg)
             bleu = compute_bleu_for_sents(preds, gold)

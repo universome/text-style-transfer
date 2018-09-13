@@ -7,107 +7,143 @@ from firelab.utils.training_utils import cudable
 from src.utils.gumbel import gumbel_softmax_sample
 
 
-def inference(model, z, vocab, enc_mask=None, max_len=100, bos_token='<bos>', eos_token='<eos>', active_seqs=None):
-    "Common inference procedure for different decoders"
-    batch_size = z.size(0)
-    BOS, EOS = vocab.stoi[bos_token], vocab.stoi[eos_token]
+class InferenceState:
+    def __init__(self, state_dict:dict):
+        # Required arguments
+        self.model = state_dict['model']
+        self.vocab = state_dict['vocab']
+        self.inputs = state_dict['inputs']
+        self.batch_size = self.inputs.size(0)
 
-    assert EOS != vocab.stoi['<unk>'] # TODO: BOS either?
+        # Optional arguments
+        self.bos_token = state_dict.get('bos_token', '<bos>')
+        self.eos_token = state_dict.get('eos_token', '<eos>')
+        self.pad_token = state_dict.get('pad_token', '<pad>')
+        self.unk_token = state_dict.get('unk_token', '<unk>')
+        self.bos_idx = self.vocab.stoi[self.bos_token]
+        self.eos_idx = self.vocab.stoi[self.eos_token]
+        self.pad_idx = self.vocab.stoi[self.pad_token]
+        self.unk_idx = self.vocab.stoi[self.unk_token]
+        self.active_seqs = state_dict.get('active_seqs', self.generate_active_seqs())
+        self.max_len = state_dict.get('max_len', 100)
+        self.temperature = state_dict.get('temperature', 1)
+        self.kwargs = state_dict.get('kwargs', {})
+        self.gumbel = state_dict.get('gumbel', False)
+        self.enc_mask = state_dict.get('enc_mask')
+        self.should_stack_finished = state_dict.get('should_stack_finished', False)
 
-    active_seqs = active_seqs or cudable(T.tensor([[BOS] for _ in range(batch_size)]).long())
-    active_seqs_idx = np.arange(batch_size)
-    finished = [None for _ in range(batch_size)]
-    n_finished = 0
+        # Inner properties
+        self.finished = [None for _ in range(self.batch_size)]
+        self.active_seqs_idx = T.arange(self.batch_size)
+        self.should_stop = False
+        self.num_steps_done = 0
 
-    for _ in range(max_len):
-        # TODO: use beam search
-        # TODO: this code looks awful.
-        if enc_mask is None:
-            next_tokens_dists = model.forward(z, active_seqs)
-        else:
-            next_tokens_dists = model.forward(z, active_seqs, enc_mask)
+        self.validate()
 
-        # TODO: first do [:,-1], then .max(...), cause it's faster this way
-        next_tokens = next_tokens_dists.max(dim=-1)[1][:,-1]
-        active_seqs = T.cat((active_seqs, next_tokens.unsqueeze(1)), dim=-1)
-        finished_mask = (next_tokens == EOS).cpu().numpy().astype(bool)
-        finished_seqs_idx = active_seqs_idx[finished_mask]
-        active_seqs_idx = active_seqs_idx[finished_mask == 0]
-        n_finished += finished_seqs_idx.size
+    def generate_active_seqs(self):
+        return cudable(T.tensor([[self.bos_idx] for _ in range(self.batch_size)]).long())
 
-        if finished_seqs_idx.size != 0:
-            # TODO(universome)
-            # finished[finished_seqs_idx] = active_seqs.masked_select(next_tokens == EOS).cpu().numpy()
-            for i, seq in zip(finished_seqs_idx, active_seqs[next_tokens == EOS]):
-                finished[i] = seq.cpu().numpy().tolist()
+    def validate(self):
+        assert self.max_len > 0
+        assert type(self.bos_token) is str
+        assert type(self.eos_token) is str
 
-            active_seqs = active_seqs[next_tokens != EOS]
-            z = z[next_tokens != EOS]
-            if not enc_mask is None:
-                enc_mask = enc_mask[next_tokens != EOS]
+        # Checking that our bos/eos token idx are in the dictionary
+        assert self.bos_idx != self.vocab.stoi[self.unk_token]
+        assert self.eos_idx != self.vocab.stoi[self.unk_token]
 
-        if n_finished == batch_size: break
+    def is_finished(self):
+        num_active = sum([s is None for s in self.finished])
 
-    # Well, some sentences were finished at the time
-    # Let's just fill them in
-    if n_finished != batch_size:
-        # TODO(universome): finished[active_seqs_idx] = active_seqs
-        for i, seq in zip(active_seqs_idx, active_seqs):
-            finished[i] = seq.cpu().numpy().tolist()
+        return num_active == 0 or self.num_steps_done >= self.max_len
 
-    return finished
-
-
-def gumbel_inference(model: nn.Module, memory, vocab, max_lens: list, t: int=1):
-    "Differentiable inference with Gumbel softmax"
-    batch_size = memory.size(0)
-    eps = 1e-16
-    BOS, EOS, PAD = vocab.stoi['<bos>'], vocab.stoi['<eos>'], vocab.stoi['<pad>']
-    active = cudable(T.zeros(batch_size, 1, len(vocab)).fill_(eps).index_fill_(2, T.tensor(BOS), 1.))
-    active_idx = np.arange(batch_size)
-    finished = [None for _ in range(batch_size)]
-    n_finished = 0
-
-    for _ in range(max(max_lens)):
-        next_tokens_dists = model.forward(memory, active, onehot=False)[:,-1]
-        next_tokens_dists = F.softmax(next_tokens_dists, dim=1)
-        next_tokens_dists = gumbel_softmax_sample(next_tokens_dists, t)
-        finished_mask = next_tokens_dists.max(dim=-1)[1] == EOS
-        curr_lens = [len(s) for s in active]
-        len_exceeded_mask = cudable(T.tensor([l >= (m-1) for l, m in zip(curr_lens, max_lens)]))
-        finished_mask = finished_mask | len_exceeded_mask
-        finished_mask_np = finished_mask.cpu().numpy().astype(bool)
-        active = T.cat((active, next_tokens_dists.unsqueeze(1)), dim=1)
-        # finished_mask = (next_tokens == EOS).cpu().numpy().astype(bool)
-        finished_seqs_idx = active_idx[finished_mask_np]
-        active_idx = active_idx[finished_mask_np == 0]
-        n_finished += finished_seqs_idx.size
-
-        if finished_seqs_idx.size != 0:
-            # TODO(universome)
-            # finished[finished_seqs_idx] = active.masked_select(next_tokens == EOS).cpu().numpy()
-            for i, seq in zip(finished_seqs_idx, active[finished_mask]):
-                finished[i] = seq
-
-            active = active[~finished_mask]
-            memory = memory[~finished_mask]
-
-        if n_finished == batch_size: break
-
-    # Well, some sentences were finished at the time. Let's just fill them in.
-    if n_finished != batch_size:
+    def force_finish(self):
+        "Finishes all the sentences because max length was exceeded"
         # TODO(universome): finished[active_idx] = active
-        for i, seq in zip(active_idx, active):
-            finished[i] = seq
+        for i, seq in zip(self.active_seqs_idx, self.active_seqs):
+            self.finished[i] = seq
 
-    # Now let's fill short sentences with pads
-    max_len = max(len(s) for s in finished)
-    for i, seq in enumerate(finished):
-        assert len(seq) <= max_len and seq.dim() == 2
-        if len(seq) != max_len:
-            pads = cudable(T.zeros(max_len - len(seq), len(vocab)).fill_(eps).index_fill_(1, T.tensor(PAD), 1.))
-            finished[i] = T.cat((seq, pads), dim=0)
+    def stack_finished(self):
+        "Pads finished sequences with <pad> token and stacks into tensor"
+        max_len = max(len(s) for s in self.finished)
 
-    finished = cudable(T.stack(finished))
+        for i, seq in enumerate(self.finished):
+            self.finished[i] = self.pad_to_max(seq, max_len)
 
-    return finished
+        self.finished = cudable(T.stack(self.finished))
+
+    def pad_to_max(self, seq, max_len):
+        if len(seq) == max_len: return seq
+
+        if self.gumbel:
+            # TODO: we fill with eps to prevent numerical issues in loss computation later
+            # But loss on pads is always zero, why are we doing this?
+            eps = 1e-8
+            pads = cudable(T.zeros(max_len - len(seq), len(self.vocab)))
+            pads = pads.fill_(eps).index_fill_(1, T.tensor(self.pad_idx), 1.)
+        else:
+            pads = cudable(T.zeros(max_len - len(seq)).fill_(self.pad_idx))
+
+        return T.cat((seq, pads), dim=0)
+
+    def update_finished(self):
+        "Adding finished sequences to the `finished` list"
+        just_finished_idx = self.active_seqs_idx[self.finished_mask()]
+
+        # TODO: finished[just_finished_idx] = active.masked_select(next_tokens == EOS)
+        for i, seq in zip(just_finished_idx, self.active_seqs[self.finished_mask()]):
+            self.finished[i] = seq
+
+    def update_active_seqs(self):
+        "Removing finished sequences from the batch"
+        next_x = self.next_tokens if not self.gumbel else self.next_tokens_dists
+        self.active_seqs = T.cat([self.active_seqs, next_x.unsqueeze(1)], dim=-1)
+        self.active_seqs = self.active_seqs[~self.finished_mask()]
+        self.active_seqs_idx = self.active_seqs_idx[~self.finished_mask()]
+        self.inputs = self.inputs[~self.finished_mask()]
+
+        if not self.enc_mask is None:
+            self.enc_mask = self.enc_mask[~self.finished_mask()]
+
+    def forward(self):
+        # TODO: let's hard-code single encoder mask arg until we'll need something more general
+        args = [] if self.enc_mask is None else self.enc_mask
+        next_tokens_dists = self.model.forward(self.inputs, self.active_seqs, *args, **self.kwargs)[:, -1]
+        next_tokens = next_tokens_dists.max(dim=-1)[1] # TODO: use temperature
+
+        if self.gumbel:
+            next_tokens_dists = F.softmax(next_tokens_dists, dim=1)
+            next_tokens_dists = gumbel_softmax_sample(next_tokens_dists, self.temperature)
+
+        self.next_tokens = next_tokens
+        self.next_tokens_dists = next_tokens_dists
+
+    def finished_mask(self):
+        return self.next_tokens == self.eos_idx
+
+    def inference(self):
+        for _ in range(self.max_len):
+            self.forward()
+            self.update_finished()
+            self.update_active_seqs()
+
+            if self.is_finished():
+                break
+
+        self.force_finish()
+        if self.should_stack_finished: self.stack_finished()
+
+        return self.finished
+
+
+def simple_inference(model, z, vocab, max_len=100):
+    infered = InferenceState({
+        'model': model,
+        'inputs': z,
+        'vocab': vocab,
+        'max_len': max_len
+    }).inference()
+
+    infered = [x.cpu().numpy().tolist() for x in infered]
+
+    return infered
