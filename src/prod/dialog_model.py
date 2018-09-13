@@ -63,7 +63,6 @@ def predict(sentences:List[str], n_lines:int):
             'eos_token': EOS_TOKEN
         }).inference()
         next_lines = itos_many(next_lines, field.vocab, sep='')
-        print('Generated next lines:', next_lines)
         dialogs = [d + EOS_TOKEN + l for d, l in zip(dialogs, next_lines)]
 
     dialogs = [d.split(EOS_TOKEN) for d in dialogs]

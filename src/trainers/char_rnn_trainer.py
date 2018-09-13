@@ -52,7 +52,8 @@ class CharRNNTrainer(BaseTrainer):
         print('Dataloaders initialized!')
 
     def init_models(self):
-        self.lm = cudable(RNNLM(self.config.hp.model_size, self.vocab))
+        self.lm = cudable(RNNLM(self.config.hp.model_size,
+            self.vocab, n_layers=self.config.hp.n_layers))
 
     def init_criterions(self):
         self.criterion = nn.CrossEntropyLoss()

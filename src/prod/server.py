@@ -4,10 +4,13 @@ import json
 import random
 import traceback
 
+import torch
 from flask import Flask, request
 from flask_restful import Resource, Api, output_json
 
-from style_model import predict as restyle
+# from style_model import predict as restyle
+from utils import validate
+from dialog_model import predict as generate_dialog
 from news import retrieve_random_dialog
 
 class UnicodeApi(Api):
@@ -36,6 +39,7 @@ class Style(Resource):
             return {'result': restyle(request.json['sentences'])}
         except Exception:
             traceback.print_exc()
+            torch.cuda.empty_cache()
 
             return {'error': 'Something went wrong'}, 500
 
@@ -55,8 +59,33 @@ class Dialog(Resource):
         else:
             return {'result': retrieve_random_dialog()}
 
+    def post(self):
+        data = request.json
+
+        if data is None:
+            return {'error': 'You should send me json data!'}, 400
+
+        sentences_val_errors = validate(data, 'sentences', list)
+        n_lines_val_errors = validate(data, 'n_lines', int)
+        if sentences_val_errors: return {'error': sentences_val_errors}, 400
+        if n_lines_val_errors: return {'error': n_lines_val_errors}, 400
+
+        for sentence in data['sentences']:
+            if not type(sentence) is str: return {'error': '`sentence` must be a string!'}, 400
+
+        if not type(data['n_lines']) is int: return {'error': '`n_lines` must be an integer!'}, 400
+        if not 0 < data['n_lines'] <= 100: return {'error': '`n_lines` must be between 1 and 100!'}, 400
+
+        try:
+            return {'result': generate_dialog(data['sentences'], data['n_lines'])}
+        except Exception:
+            traceback.print_exc()
+            torch.cuda.empty_cache()
+
+            return {'error': 'Something went wrong'}, 500
+
 api.add_resource(Style, '/style')
 api.add_resource(Dialog, '/dialog')
 
 if __name__ == '__main__':
-    app.run(port=10101, host='0.0.0.0')
+    app.run(port=10101, host='0.0.0.0', threaded=False)
