@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from firelab.utils.training_utils import cudable
+from torch.distributions import Categorical
 
 from src.utils.gumbel import gumbel_softmax_sample
 
@@ -25,8 +26,9 @@ class InferenceState:
         self.unk_idx = self.vocab.stoi[self.unk_token]
         self.max_len = state_dict.get('max_len', 100)
         self.temperature = state_dict.get('temperature', 1)
+        self.sample_type = state_dict.get('sample_type', 'max') # max or sample
         self.kwargs = state_dict.get('kwargs', {})
-        self.gumbel = state_dict.get('gumbel', False)
+        self.gumbel = state_dict.get('gumbel', False) # TODO: decompose into add_gumbel_noise/ste/differentiable args
         self.enc_mask = state_dict.get('enc_mask')
         self.should_stack_finished = state_dict.get('should_stack_finished', False)
         self.inputs_batch_first = state_dict.get('inputs_batch_first', True)
@@ -111,7 +113,7 @@ class InferenceState:
         # TODO: let's hard-code single encoder mask arg until we'll need something more general
         args = [] if self.enc_mask is None else self.enc_mask
         next_tokens_dists = self.model.forward(self.inputs, self.active_seqs, *args, **self.kwargs)[:, -1]
-        next_tokens = next_tokens_dists.max(dim=-1)[1] # TODO: use temperature
+        next_tokens = self.sample(next_tokens_dists)
 
         if self.gumbel:
             next_tokens_dists = F.softmax(next_tokens_dists, dim=1)
@@ -119,6 +121,14 @@ class InferenceState:
 
         self.next_tokens = next_tokens
         self.next_tokens_dists = next_tokens_dists
+
+    def sample(self, token_dists):
+        if self.sample_type == 'max':
+            return token_dists.max(dim=-1)[1]
+        elif self.sample_type == 'sample':
+            return Categorical(logits=token_dists/self.temperature).sample()
+        else:
+            raise NotImplementedError
 
     def finished_mask(self):
         return self.next_tokens == self.eos_idx
