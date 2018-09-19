@@ -13,7 +13,6 @@ class InferenceState:
         self.model = state_dict['model']
         self.vocab = state_dict['vocab']
         self.inputs = state_dict['inputs']
-        self.batch_size = self.inputs.size(0)
 
         # Optional arguments
         self.bos_token = state_dict.get('bos_token', '<bos>')
@@ -24,13 +23,15 @@ class InferenceState:
         self.eos_idx = self.vocab.stoi[self.eos_token]
         self.pad_idx = self.vocab.stoi[self.pad_token]
         self.unk_idx = self.vocab.stoi[self.unk_token]
-        self.active_seqs = state_dict.get('active_seqs', self.generate_active_seqs())
         self.max_len = state_dict.get('max_len', 100)
         self.temperature = state_dict.get('temperature', 1)
         self.kwargs = state_dict.get('kwargs', {})
         self.gumbel = state_dict.get('gumbel', False)
         self.enc_mask = state_dict.get('enc_mask')
         self.should_stack_finished = state_dict.get('should_stack_finished', False)
+        self.inputs_batch_first = state_dict.get('inputs_batch_first', True)
+        self.batch_size = self.inputs.size(0 if self.inputs_batch_first else 1)
+        self.active_seqs = state_dict.get('active_seqs', self.generate_active_seqs())
 
         # Inner properties
         self.finished = [None for _ in range(self.batch_size)]
@@ -45,6 +46,7 @@ class InferenceState:
 
     def validate(self):
         assert self.max_len > 0
+        assert self.batch_size > 0
         assert type(self.bos_token) is str
         assert type(self.eos_token) is str
 
@@ -100,7 +102,7 @@ class InferenceState:
         self.active_seqs = T.cat([self.active_seqs, next_x.unsqueeze(1)], dim=-1)
         self.active_seqs = self.active_seqs[~self.finished_mask()]
         self.active_seqs_idx = self.active_seqs_idx[~self.finished_mask()]
-        self.inputs = self.inputs[~self.finished_mask()]
+        self.inputs = self.inputs[~self.finished_mask()] if self.inputs_batch_first else self.inputs[:, ~self.finished_mask()]
 
         if not self.enc_mask is None:
             self.enc_mask = self.enc_mask[~self.finished_mask()]
