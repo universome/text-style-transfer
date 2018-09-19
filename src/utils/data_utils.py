@@ -1,4 +1,5 @@
 import random
+
 import numpy as np
 import torch
 from torch.autograd import Variable
@@ -81,3 +82,30 @@ def word_base(word: str, k: int) -> str:
             return word[len(p) : len(p) + k]
 
     return word[:k]
+
+
+def repeat_str_to_longest(str_x, str_y, eos=None):
+    """
+    Takes two strings (str_x and str_y) and repeats smaller one such
+    that both strings have equal lengths
+    """
+    if len(str_x) < len(str_y):
+        str_x = repeat_str_to_size(str_x, len(str_y), eos)
+    elif len(str_x) > len(str_y):
+        str_y = repeat_str_to_size(str_y, len(str_x), eos)
+
+    return str_x, str_y
+
+
+def repeat_str_to_size(s, size, eos=''):
+    if len(s) >= size: return s
+
+    num_repeats = (size - len(s)) // len(s)
+    s = eos.join([s for _ in range(num_repeats)])
+
+    assert (size - len(s)) // len(s) == 1
+
+    if len(s) != size:
+        s = s + eos + s[:size-len(s)]
+
+    return s
