@@ -1,23 +1,25 @@
 title: "Character-level RNN for open subtitles"
 trainer: "CharRNNTrainer"
 data:
-  # train: "data/generated/tmp_sents"
-  # val: "data/generated/tmp_sents"
-  train: "data/generated/classic-dialogs.txt"
+  train:
+    # domain_x: "data/subs/subs.filtered.detok.toy"
+    # domain_y: "data/generated/classic-dialogs.toy"
+    domain_x: "data/subs/subs.filtered.detok"
+    domain_y: "data/generated/classic-dialogs.txt"
   val: "data/subs/subs.filtered.val"
 max_num_epochs: 200
-val_freq_iters: 1000
+val_freq_iters: 100
 val_set_size: 5000
 display_k_val_examples: 10
 modules:
-  models: ["lm"]
+  models: ["lm", "style_embed"]
 checkpoint:
   freq_epochs: 1
   pickle: ["vocab"]
 random_seed: 42
 hp:
-  model_size: 4096
-  n_layers: 1
+  model_size: 2048
+  n_layers: 2
   batch_size: 128
   batch_len: 256
   optim:
