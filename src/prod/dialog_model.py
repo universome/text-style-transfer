@@ -4,7 +4,6 @@ import pickle
 import sys; sys.path.extend(['.'])
 from typing import List
 
-from nltk import word_tokenize
 import numpy as np
 import torch
 from torchtext import data
@@ -39,7 +38,7 @@ lm = cudable(RNNLM(config.hp.model_size, field.vocab, n_layers=config.hp.n_layer
 lm.load_state_dict(torch.load(get_path('lm'), map_location=location))
 
 
-def predict(sentences:List[str], n_lines:int):
+def predict(sentences:List[str], n_lines:int, temperature:float=1.):
     "For each sentence generates `n_lines` lines sequentially to form a dialog"
 
     dialogs = [s for s in sentences] # Let's not mutate original list and copy it
@@ -52,7 +51,7 @@ def predict(sentences:List[str], n_lines:int):
         batch = cudable(next(iter(dataloader))) # We have a single batch
         text = batch.text[:, -MAX_CONTEXT_SIZE:] # As we made pad_first we are not afraid of losing information
         embs = lm.embed(text)
-        z = lm.gru(embs)[1].squeeze(0)
+        z = lm.gru(embs)[1]
 
         next_lines = InferenceState({
             'model': lm,
@@ -60,12 +59,23 @@ def predict(sentences:List[str], n_lines:int):
             'vocab': field.vocab,
             'max_len': MAX_LINE_LEN,
             'bos_token': EOS_TOKEN, # We start infering a new reply when we see EOS
-            'eos_token': EOS_TOKEN
+            'eos_token': EOS_TOKEN,
+            'temperature': temperature,
+            'sample_type': 'sample',
+            'inputs_batch_first': False
         }).inference()
         next_lines = itos_many(next_lines, field.vocab, sep='')
+        next_lines = [slice_unfinished_sentence(l) for l in next_lines]
         dialogs = [d + EOS_TOKEN + l for d, l in zip(dialogs, next_lines)]
 
     dialogs = [d.split(EOS_TOKEN) for d in dialogs]
     dialogs = [[s for s in d if len(s) != 0] for d in dialogs]
 
     return dialogs
+
+
+def slice_unfinished_sentence(s):
+    if len(s) < MAX_LINE_LEN: return s # Line was finished in this way by itself
+    if s.rfind('.') == -1: return s # We can't properly finish this line
+
+    return s[:s.rfind('.')+1]
