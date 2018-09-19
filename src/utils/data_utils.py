@@ -1,3 +1,4 @@
+import math
 import random
 
 import numpy as np
@@ -109,3 +110,8 @@ def repeat_str_to_size(s, size, eos=''):
         s = s + eos + s[:size-len(s)]
 
     return s
+
+
+def split_in_batches(s:str, size:int):
+    "Splits string into batches of length `size`"
+    return [s[i*size : (i+1)*size] for i in range(math.ceil(len(s) / size))]
