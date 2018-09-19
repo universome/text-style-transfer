@@ -102,6 +102,22 @@ def filter_dialogs_in_classics(input_data_path: str, output_data_path: str):
     print('Done!')
 
 
+def dialogs_from_lines(input_data_path: str, output_data_path: str, n_lines: int, eos: str, n_dialogs: int):
+    n_lines, n_dialogs = int(n_lines), int(n_dialogs) # TODO: argparse?
+
+    print('Reading data...')
+    lines = read_corpus(input_data_path)
+    lines = lines[:n_dialogs * n_lines]
+
+    print('Generating dialogs')
+    dialogs = [lines[i:i+n_lines] for i in range(0, len(lines) - n_lines)]
+    dialogs = [eos.join(d) for d in dialogs]
+
+    print('Saving corpus')
+    save_corpus(dialogs, output_data_path)
+    print('Done!')
+
+
 def main(cmd, *args):
     if cmd == 'subs-open-nmt':
         prepare_subs_for_open_nmt(*args)
@@ -111,6 +127,8 @@ def main(cmd, *args):
         filter_subs(*args)
     elif cmd == 'filter-dialogs-in-classics':
         filter_dialogs_in_classics(*args)
+    elif cmd == 'dialogs-from-lines':
+        dialogs_from_lines(*args)
     else:
         raise NotImplementedError
 
