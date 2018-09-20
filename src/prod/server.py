@@ -8,7 +8,7 @@ import torch
 from flask import Flask, request
 from flask_restful import Resource, Api, output_json
 
-# from style_model import predict as restyle
+from style_model import predict as restyle
 from utils import validate
 from dialog_model import predict as generate_dialog
 from news import retrieve_random_dialog
@@ -16,12 +16,9 @@ from news import retrieve_random_dialog
 class UnicodeApi(Api):
     def __init__(self, *args, **kwargs):
         super(UnicodeApi, self).__init__(*args, **kwargs)
-        self.app.config['RESTFUL_JSON'] = {
-            'ensure_ascii': False
-        }
-        self.representations = {
-            'application/json; charset=utf-8': output_json,
-        }
+
+        self.app.config['RESTFUL_JSON'] = {'ensure_ascii': False}
+        self.representations = {'application/json; charset=utf-8': output_json}
 
 
 app = Flask(__name__)
