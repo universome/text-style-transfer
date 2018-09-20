@@ -1,6 +1,7 @@
 import os
 import re
 import pickle
+import random
 import sys; sys.path.extend(['.'])
 from typing import List
 
@@ -38,7 +39,7 @@ lm = cudable(RNNLM(config.hp.model_size, field.vocab, n_layers=config.hp.n_layer
 lm.load_state_dict(torch.load(get_path('lm'), map_location=location))
 
 
-def predict(sentences:List[str], n_lines:int, temperature:float=1.):
+def predict(sentences:List[str], n_lines:int, temperature:float=1., sample_type='max'):
     "For each sentence generates `n_lines` lines sequentially to form a dialog"
 
     dialogs = [s for s in sentences] # Let's not mutate original list and copy it
@@ -61,15 +62,17 @@ def predict(sentences:List[str], n_lines:int, temperature:float=1.):
             'bos_token': EOS_TOKEN, # We start infering a new reply when we see EOS
             'eos_token': EOS_TOKEN,
             'temperature': temperature,
-            'sample_type': 'sample',
+            'sample_type': sample_type,
             'inputs_batch_first': False
         }).inference()
+
         next_lines = itos_many(next_lines, field.vocab, sep='')
         next_lines = [slice_unfinished_sentence(l) for l in next_lines]
         dialogs = [d + EOS_TOKEN + l for d, l in zip(dialogs, next_lines)]
 
     dialogs = [d.split(EOS_TOKEN) for d in dialogs]
     dialogs = [[s for s in d if len(s) != 0] for d in dialogs]
+    dialogs = [assign_speakers(d) for d in dialogs]
 
     return dialogs
 
@@ -79,3 +82,18 @@ def slice_unfinished_sentence(s):
     if s.rfind('.') == -1: return s # We can't properly finish this line
 
     return s[:s.rfind('.')+1]
+
+
+def assign_speakers(dialog, speakers=('Bes', 'Borgy')):
+    # Generating sequence of 0,1,0,1,0,...
+    turns = np.tile([0,1], len(dialog))
+
+    # Choosing if it starts with 1 or 0
+    if random.random() > 0.5:
+        turns = np.concatenate([[1], turns], axis=0)
+
+    turns = turns[:len(dialog)]
+
+    dialog = [{'speaker': speakers[t], 'text': s} for s,t in zip(dialog, turns)]
+
+    return dialog
