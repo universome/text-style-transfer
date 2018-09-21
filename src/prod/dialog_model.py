@@ -39,7 +39,7 @@ lm = cudable(RNNLM(config.hp.model_size, field.vocab, n_layers=config.hp.n_layer
 lm.load_state_dict(torch.load(get_path('lm'), map_location=location))
 
 
-def predict(sentences:List[str], n_lines:int, temperature:float=1., sample_type='max'):
+def predict(sentences:List[str], n_lines:int, temperature:float=1e-5):
     "For each sentence generates `n_lines` lines sequentially to form a dialog"
 
     dialogs = [s for s in sentences] # Let's not mutate original list and copy it
@@ -62,7 +62,7 @@ def predict(sentences:List[str], n_lines:int, temperature:float=1., sample_type=
             'bos_token': EOS_TOKEN, # We start infering a new reply when we see EOS
             'eos_token': EOS_TOKEN,
             'temperature': temperature,
-            'sample_type': sample_type,
+            'sample_type': 'sample',
             'inputs_batch_first': False
         }).inference()
 

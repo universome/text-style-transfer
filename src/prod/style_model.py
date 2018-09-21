@@ -64,7 +64,7 @@ def predict(lines):
 
         z = encoder(batch.src)
         z = merge_z(torch.cat([z, morphs], dim=1))
-        z = decoder.gru(first_chars_embs, z.unsqueeze(0))[1].squeeze()
+        z = decoder.gru(first_chars_embs, z.unsqueeze(0))[1].squeeze(0)
         out = simple_inference(decoder, z, field.vocab, max_len=30)
 
         first_chars = batch.trg[:, :n_first_chars].cpu().numpy().tolist()
