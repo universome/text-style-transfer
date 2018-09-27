@@ -2,7 +2,6 @@ import os
 import math
 import random
 import pickle
-from itertools import chain
 
 import numpy as np
 import torch
@@ -13,7 +12,7 @@ from torchtext.data import Field, Example, Dataset
 from firelab import BaseTrainer
 from firelab.utils.training_utils import cudable
 
-from src.models import RNNLM
+from src.models import ConditionalLM
 from src.utils.data_utils import itos_many, char_tokenize, split_in_batches
 from src.optims.triangle_adam import TriangleAdam
 from src.inference import InferenceState
@@ -92,17 +91,13 @@ class CharRNNTrainer(BaseTrainer):
         print('Train dataloader has been built!')
 
     def init_models(self):
-        self.lm = cudable(RNNLM(self.config.hp.model_size,
-            self.vocab, n_layers=self.config.hp.n_layers))
-        self.style_embed = cudable(nn.Embedding(2, self.config.hp.model_size))
+        self.lm = cudable(ConditionalLM(self.config.hp.model_size, self.vocab))
 
     def init_criterions(self):
         self.criterion = nn.CrossEntropyLoss()
 
     def init_optimizers(self):
-        self.optim = TriangleAdam(chain(
-            self.lm.parameters(), self.style_embed.parameters()
-        ), self.config.hp.optim)
+        self.optim = TriangleAdam(self.lm.parameters(), self.config.hp.optim)
 
     def train_on_batch(self, batch):
         loss, info = self.loss_on_batch(batch)
@@ -119,15 +114,11 @@ class CharRNNTrainer(BaseTrainer):
         domain_x = cudable(domain_x).transpose(0,1)
         domain_y = cudable(domain_y).transpose(0,1)
 
-        z_x = self.style_embed(cudable(torch.zeros(len(domain_x), self.config.hp.n_layers)).long())
-        z_y = self.style_embed(cudable(torch.ones(len(domain_y), self.config.hp.n_layers)).long())
+        z_x = cudable(torch.zeros(2, len(domain_x), self.config.hp.model_size))
+        z_y = cudable(torch.zeros(2, len(domain_y), self.config.hp.model_size))
 
-        # Transposing to get n_layers dimensions first
-        z_x = z_x.transpose(1,0)
-        z_y = z_y.transpose(1,0)
-
-        preds_x = self.lm(z_x.contiguous(), domain_x[:, :-1])
-        preds_y = self.lm(z_y.contiguous(), domain_y[:, :-1])
+        preds_x = self.lm(z_x.contiguous(), domain_x[:, :-1], style=0)
+        preds_y = self.lm(z_y.contiguous(), domain_y[:, :-1], style=1)
 
         loss_x = self.criterion(preds_x.view(-1, len(self.vocab)), domain_x[:, 1:].contiguous().view(-1))
         loss_y = self.criterion(preds_y.view(-1, len(self.vocab)), domain_y[:, 1:].contiguous().view(-1))
@@ -142,11 +133,8 @@ class CharRNNTrainer(BaseTrainer):
         generated = []
 
         batch = next(self.val_iter)
-        x = self.lm.embed(cudable(batch.text))
-
-        z = self.style_embed(cudable(torch.ones(batch.batch_size, self.config.hp.n_layers)).long())
-        z = z.transpose(0, 1)
-        z = self.lm.gru(x.contiguous(), z.contiguous())[1]
+        z = cudable(torch.zeros(2, len(batch.text), self.config.hp.model_size))
+        z = self.lm(z, cudable(batch.text), style=1, return_z=True)[1]
 
         results = InferenceState({
             'model': self.lm,
@@ -155,7 +143,8 @@ class CharRNNTrainer(BaseTrainer):
             'eos_token': self.eos,
             'bos_token': self.eos, # We start decoding from eos. TODO: looks like a hack
             'max_len': 250,
-            'inputs_batch_first': False
+            'inputs_batch_first': False,
+            'kwargs': {'style': 1}
         }).inference()
         results = itos_many(results, self.vocab, sep='')
         results = [''.join(s for s in sent if s != self.eos) for sent in results]
