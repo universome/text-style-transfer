@@ -23,21 +23,29 @@ from utils import create_get_path_fn
 EOS_TOKEN = '|'
 MAX_LINE_LEN = 256
 MAX_CONTEXT_SIZE = 512
-config = load_config('experiments/char-rnn/config.yml')
 
-# models_dir = 'experiments/char-wm/checkpoints'
-get_path = create_get_path_fn('dialog_models')
+def init_lm(config_path, state_path):
+    config = load_config(config_path)
+    get_path = create_get_path_fn(state_path)
 
-# Loading vocab
-field = Field(eos_token=EOS_TOKEN, batch_first=True,
-              tokenize=char_tokenize, pad_first=True)
-field.vocab = pickle.load(open(get_path('vocab', 'pickle'), 'rb'))
+    # Loading vocab
+    field = Field(eos_token=EOS_TOKEN, batch_first=True,
+                tokenize=char_tokenize, pad_first=True)
+    field.vocab = pickle.load(open(get_path('vocab', 'pickle'), 'rb'))
 
-print('Loading models..')
-location = None if torch.cuda.is_available() else 'cpu'
-lm = cudable(RNNLM(config.hp.model_size, field.vocab, n_layers=config.hp.n_layers)).eval()
-lm.load_state_dict(torch.load(get_path('lm'), map_location=location))
+    print('Loading models..')
+    location = None if torch.cuda.is_available() else 'cpu'
+    lm = cudable(RNNLM(config.hp.model_size, field.vocab, n_layers=config.hp.n_layers)).eval()
+    lm.load_state_dict(torch.load(get_path('lm'), map_location=location))
 
+    return lm, field
+
+# classic_lm = init_lm('experiments/char-rnn/config.yml', 'dialog_models')
+subs_lm, subs_field = init_lm('subs_lm/config.yml', 'subs_lm/state')
+# classic_lm, classic_field = init_lm('classic_lm/config.yml', 'classic_lm/state')
+
+# TODO: does not look like a good way to deploy a model
+lm, field = subs_lm, subs_field
 
 def predict(sentences:List[str], n_lines:int, temperature:float=1e-5):
     "For each sentence generates `n_lines` lines sequentially to form a dialog"

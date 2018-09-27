@@ -85,4 +85,3 @@ def generate_from_golds(t):
 
 if __name__ == '__main__':
     main(sys.argv[2])
-

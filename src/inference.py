@@ -112,7 +112,7 @@ class InferenceState:
     def forward(self):
         # TODO: let's hard-code single encoder mask arg until we'll need something more general
         args = [] if self.enc_mask is None else self.enc_mask
-        next_tokens_dists = self.model.forward(self.inputs, self.active_seqs, *args, **self.kwargs)[:, -1]
+        next_tokens_dists = self.model(self.inputs, self.active_seqs, *args, **self.kwargs)[:, -1]
         next_tokens = self.sample(next_tokens_dists)
 
         if self.gumbel:
