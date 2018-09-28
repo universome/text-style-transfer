@@ -18,9 +18,9 @@ from src.optims.triangle_adam import TriangleAdam
 from src.inference import InferenceState
 
 
-class CharRNNTrainer(BaseTrainer):
+class ConditionalCharRNNTrainer(BaseTrainer):
     def __init__(self, config):
-        super(CharRNNTrainer, self).__init__(config)
+        super(ConditionalCharRNNTrainer, self).__init__(config)
 
     def init_dataloaders(self):
         print('Initializing dataloaders')
