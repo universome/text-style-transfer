@@ -12,7 +12,7 @@ from torchtext.data import Field, Dataset, Example
 from firelab.utils.training_utils import cudable
 from firelab.utils.fs_utils import load_config
 
-from src.models import RNNLM
+from src.models import RNNLM, ConditionalLM
 from src.utils.data_utils import itos_many, char_tokenize, word_base
 from src.morph import morph_chars_idx, MORPHS_SIZE
 from src.inference import InferenceState
@@ -24,28 +24,36 @@ EOS_TOKEN = '|'
 MAX_LINE_LEN = 256
 MAX_CONTEXT_SIZE = 512
 
-def init_lm(config_path, state_path):
+def init_lm(config_path, state_path, model_cls):
     config = load_config(config_path)
     get_path = create_get_path_fn(state_path)
 
     # Loading vocab
     field = Field(eos_token=EOS_TOKEN, batch_first=True,
-                tokenize=char_tokenize, pad_first=True)
+                  tokenize=char_tokenize, pad_first=True)
     field.vocab = pickle.load(open(get_path('vocab', 'pickle'), 'rb'))
 
     print('Loading models..')
     location = None if torch.cuda.is_available() else 'cpu'
-    lm = cudable(RNNLM(config.hp.model_size, field.vocab, n_layers=config.hp.n_layers)).eval()
+
+    if model_cls is RNNLM:
+        lm = cudable(RNNLM(config.hp.model_size, field.vocab, n_layers=config.hp.n_layers)).eval()
+    elif model_cls is ConditionalLM:
+        lm = cudable(ConditionalLM(config.hp.model_size, field.vocab)).eval()
+    else:
+        raise NotImplementedError
+
     lm.load_state_dict(torch.load(get_path('lm'), map_location=location))
 
     return lm, field
 
 # classic_lm = init_lm('experiments/char-rnn/config.yml', 'dialog_models')
-subs_lm, subs_field = init_lm('subs_lm/config.yml', 'subs_lm/state')
+# subs_lm, subs_field = init_lm('subs_lm/config.yml', 'subs_lm/state')
 # classic_lm, classic_field = init_lm('classic_lm/config.yml', 'classic_lm/state')
 
 # TODO: does not look like a good way to deploy a model
-lm, field = subs_lm, subs_field
+lm, field = init_lm('conditional_lm/config.yml', 'conditional_lm/state', ConditionalLM)
+
 
 def predict(sentences:List[str], n_lines:int, temperature:float=1e-5):
     "For each sentence generates `n_lines` lines sequentially to form a dialog"
@@ -83,6 +91,46 @@ def predict(sentences:List[str], n_lines:int, temperature:float=1e-5):
     dialogs = [assign_speakers(d) for d in dialogs]
 
     return dialogs
+
+
+def predict_next_word(sentences:List[str], temperature:float=1e-5):
+    assert all([s[-1] != ' ' for s in sentences])
+    assert all([type(s) is str for s in sentences])
+
+    # We do not need EOS token, because we continuing the line
+    # and not generating the whole one after the previous one
+    nw_field = Field(eos_token=None, batch_first=True,
+                  tokenize=char_tokenize, pad_first=True)
+    nw_field.vocab = field.vocab
+
+    batch_size = len(sentences)
+    MAX_WORD_LEN = 20
+
+    examples = [Example.fromlist([s], [('text', nw_field)]) for s in sentences]
+    dataset = Dataset(examples, [('text', nw_field)])
+    dataloader = data.BucketIterator(dataset, batch_size, shuffle=False, repeat=False)
+    batch = cudable(next(iter(dataloader))) # We have a single batch
+    text = batch.text[:, -MAX_CONTEXT_SIZE:] # As we made pad_first we are not afraid of losing information
+    z = cudable(torch.zeros(2, len(text), 2048))
+    z = lm(z, text, style=1, return_z=True)[1]
+
+    next_words = InferenceState({
+        'model': lm,
+        'inputs': z,
+        'vocab': nw_field.vocab,
+        'max_len': MAX_WORD_LEN,
+        'bos_token': ' ',
+        'eos_token': ' ',
+        'temperature': temperature,
+        'sample_type': 'sample',
+        'inputs_batch_first': False,
+        'kwargs': {'style': 1}
+    }).inference()
+
+    next_words = itos_many(next_words, field.vocab, sep='')
+    next_words = [w.strip() for w in next_words]
+
+    return next_words
 
 
 def slice_unfinished_sentence(s):
