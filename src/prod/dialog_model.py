@@ -51,7 +51,7 @@ def init_lm(config_path, state_path, model_cls):
 # subs_lm, subs_field = init_lm('subs_lm/config.yml', 'subs_lm/state')
 # classic_lm, classic_field = init_lm('classic_lm/config.yml', 'classic_lm/state')
 
-# TODO: does not look like a good way to deploy a model
+# TODO: does not look like a good way to deploy a model :|
 lm, field = init_lm('conditional_lm/config.yml', 'conditional_lm/state', ConditionalLM)
 
 
