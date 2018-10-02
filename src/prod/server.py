@@ -1,5 +1,6 @@
 "Server for running the model"
 
+import argparse
 import json
 import random
 import traceback
@@ -12,6 +13,11 @@ from style_model import predict as restyle
 from utils import validate
 from dialog_model import predict as generate_dialog
 from news import retrieve_random_dialog
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--port', '-p', help='Port number to use', dest='port', type=int, choices=range(10101,10109))
+args = parser.parse_args()
+
 
 class UnicodeApi(Api):
     def __init__(self, *args, **kwargs):
@@ -85,4 +91,4 @@ api.add_resource(Style, '/style')
 api.add_resource(Dialog, '/dialog')
 
 if __name__ == '__main__':
-    app.run(port=10101, host='0.0.0.0', threaded=False)
+    app.run(port=args.port, host='0.0.0.0', threaded=False)
