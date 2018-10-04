@@ -3,14 +3,14 @@ trainer: "CharRNNTrainer"
 data:
   train: "data/news/news.ru.train"
   val: "data/news/news.ru.val"
-max_num_iters: 1100
+max_num_epochs: 10
 val_freq_iters: 100
 val_set_size: 5000
 display_k_val_examples: 10
 modules:
   models: ["lm"]
 checkpoint:
-  freq_iters: 100
+  freq_iters: 3000
   pickle: ["vocab"]
 random_seed: 42
 hp:

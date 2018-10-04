@@ -21,7 +21,10 @@ from style_model import predict as restyle
 
 N_LINES = 7
 titles = [n['title'] for n in NEWS]
-AVAILABLE_SCHEMES = ['just-on-titles', 'from-golds', 'with-style', 'next-words', 'score-models']
+AVAILABLE_SCHEMES = [
+    'just-on-titles', 'from-golds', 'with-style',
+    'next-words', 'score-models', 'score-ensemble'
+]
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--scheme', '-s', dest='scheme', type=str,
@@ -50,6 +53,8 @@ def main(scheme, output_file_path=None):
         predict_next_words(scheme, predict_next_word, output_file_path)
     elif scheme == 'score-models':
         score_models()
+    elif scheme == 'score-ensemble':
+        score_ensemble()
     else:
         raise NotImplementedError
 
@@ -57,15 +62,27 @@ def main(scheme, output_file_path=None):
 def score_models():
     MODELS_DIRS = [
         ('conditional_lm', 'ConditionalLM', {'style': 1}),
-        ('char_lm_from_embs', 'CharLMFromEmbs', {}),
-        ('subs_lm', 'RNNLM', {}),
-        ('fine_tuned_classic_lm', 'RNNLM', {}),
-        ('classic_lm', 'RNNLM', {}),
+        # ('char_lm_from_embs', 'CharLMFromEmbs', {}),
+        # ('subs_lm', 'RNNLM', {}),
+        # ('fine_tuned_classic_lm', 'RNNLM', {}),
+        # ('classic_lm', 'RNNLM', {}),
     ]
 
     for dir, model_cls_name, kwargs in MODELS_DIRS:
         predict_fn = build_predict_fn(dir, model_cls_name, kwargs)
         output_file_path = 'examples/%s.txt' % dir
+        generate_dialogs('just-on-titles', predict_fn, output_file_path)
+
+
+def score_ensemble():
+    weights_list = [(0.9, 0.1), (0.75, 0.25), (0.5, 0.5), (0.25, 0.75), (0.1, 0.9)]
+
+    for weights in weights_list:
+        predict_fn = build_predict_fn(None, 'WeightedLMEnsemble',
+            ensemble_models=[('classic_lm', 'RNNLM'), ('overfitted_fine_tuned_classic_lm', 'RNNLM')],
+            ensemble_weights=weights
+        )
+        output_file_path = 'ensemble-examples/{}-{}.txt'.format(*weights)
         generate_dialogs('just-on-titles', predict_fn, output_file_path)
 
 
@@ -118,7 +135,15 @@ def predict_next_words(scheme, predict_fn, output_file_path):
 
 
 def generate_on_titles(t, predict_fn):
-    dialogs = predict_fn(titles, N_LINES, t)
+    # sentences = titles + [
+    #     'У тебя раньше была целая спальня .|Теперь там мое личное место .|Кэндис , ты можешь ... подойти и передвинуть диван слева ... типа , на один дюйм в сторону окна ?',
+    #     'Другие идут .|" Остаться в живых "|Эпизод 23',
+    #     'Надо поднять .|Нам не встать в дрейф .|Мачты .',
+    #     'Кроме того , они подтвердили одну мою мысль .|В конечном итоге всё из-за друзей .|Мы пытаемся измениться .',
+    #     'Принц , а почему вы трубочист ?|Я решил навсегда остаться в этом королевстве , а денег у меня нет .|Здесь живет девушка , в которую я влюблен .'
+    # ]
+    sentences = titles
+    dialogs = predict_fn(sentences, N_LINES, t)
     dialogs = [[l['text'] for l in d] for d in dialogs]
 
     return dialogs

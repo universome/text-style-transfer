@@ -19,7 +19,7 @@ from src.morph import morph_chars_idx, MORPHS_SIZE
 from src.inference import InferenceState
 
 from utils import create_get_path_fn
-from throwaway_models import CharLMFromEmbs
+from throwaway_models import CharLMFromEmbs, WeightedLMEnsemble
 
 # Some constants
 EOS_TOKEN = '|'
@@ -28,7 +28,7 @@ MAX_CONTEXT_SIZE = 512
 MODEL_CLASSES = {
     'RNNLM': RNNLM,
     'ConditionalLM': ConditionalLM,
-    'CharLMFromEmbs': CharLMFromEmbs
+    'CharLMFromEmbs': CharLMFromEmbs,
 }
 
 def init_lm(config_path, state_path, model_cls_name:str):
@@ -64,8 +64,18 @@ def init_lm(config_path, state_path, model_cls_name:str):
     return lm, field
 
 
-def build_predict_fn(model_dir:str, model_cls_name:str, inference_kwargs={}):
-    lm, field = init_lm('%s/config.yml' % model_dir, '%s/state' % model_dir, model_cls_name)
+def build_predict_fn(model_dir:str, model_cls_name:str, inference_kwargs={}, ensemble_models=None, ensemble_weights=None):
+    if model_cls_name != 'WeightedLMEnsemble':
+        lm, field = init_lm('%s/config.yml' % model_dir, '%s/state' % model_dir, model_cls_name)
+    else:
+        lms = []
+        field = None
+
+        for sub_model_dir, sub_model_cls_name in ensemble_models:
+            lm, field = init_lm('%s/config.yml' % sub_model_dir, '%s/state' % sub_model_dir, sub_model_cls_name)
+            lms.append(lm)
+
+        lm = WeightedLMEnsemble(lms, ensemble_weights)
 
     def predict(sentences:List[str], n_lines:int, temperature:float=1e-5):
         "For each sentence generates `n_lines` lines sequentially to form a dialog"
@@ -85,6 +95,9 @@ def build_predict_fn(model_dir:str, model_cls_name:str, inference_kwargs={}):
             elif model_cls_name == 'ConditionalLM':
                 z = cudable(torch.zeros(2, len(text), 2048))
                 z = lm(z, text, style=1, return_z=True)[1]
+            elif model_cls_name == 'WeightedLMEnsemble':
+                z = cudable(torch.zeros(2, 1, len(text), 4096))
+                z = lm(z, text, return_z=True)[1]
             else:
                 embs = lm.embed(text)
                 z = lm.gru(embs)[1]
@@ -98,7 +111,7 @@ def build_predict_fn(model_dir:str, model_cls_name:str, inference_kwargs={}):
                 'eos_token': EOS_TOKEN,
                 'temperature': temperature,
                 'sample_type': 'sample',
-                'inputs_batch_first': False,
+                'inputs_batch_dim': 1 if model_cls_name != 'WeightedLMEnsemble' else 2,
                 'kwargs': inference_kwargs
             }).inference()
 
@@ -142,4 +155,9 @@ def assign_speakers(dialog, speakers=('Bes', 'Borgy')):
 # subs_lm, subs_field = init_lm('subs_lm/config.yml', 'subs_lm/state')
 # classic_lm, classic_field = init_lm('classic_lm/config.yml', 'classic_lm/state')
 print('Loading default dialog model..')
-predict = build_predict_fn('conditional_lm', 'ConditionalLM', {'style': 1})
+# predict = build_predict_fn('conditional_lm', 'ConditionalLM', {'style': 1})
+predict = build_predict_fn('fine_tuned_classic_lm', 'RNNLM')
+# predict = build_predict_fn(None, 'WeightedLMEnsemble',
+#     ensemble_models=[('RNNLM', 'classic_lm'), ('RNNLM', 'overfitted_fine_tuned_classic_lm')],
+#     ensemble_weights=[0.5, 0.5]
+# )

@@ -31,8 +31,8 @@ class InferenceState:
         self.gumbel = state_dict.get('gumbel', False) # TODO: decompose into add_gumbel_noise/ste/differentiable args
         self.enc_mask = state_dict.get('enc_mask')
         self.should_stack_finished = state_dict.get('should_stack_finished', False)
-        self.inputs_batch_first = state_dict.get('inputs_batch_first', True)
-        self.batch_size = self.inputs.size(0 if self.inputs_batch_first else 1)
+        self.inputs_batch_dim = state_dict.get('inputs_batch_dim', 0)
+        self.batch_size = self.inputs.size(self.inputs_batch_dim)
         self.active_seqs = state_dict.get('active_seqs', self.generate_active_seqs())
 
         # Inner properties
@@ -104,7 +104,16 @@ class InferenceState:
         self.active_seqs = T.cat([self.active_seqs, next_x.unsqueeze(1)], dim=-1)
         self.active_seqs = self.active_seqs[~self.finished_mask()]
         self.active_seqs_idx = self.active_seqs_idx[~self.finished_mask()]
-        self.inputs = self.inputs[~self.finished_mask()] if self.inputs_batch_first else self.inputs[:, ~self.finished_mask()]
+
+        # TODO: wtf is this? I'm pretty sure, that this can be rewritten normally
+        if self.inputs_batch_dim == 0:
+            self.inputs = self.inputs[~self.finished_mask()]
+        elif self.inputs_batch_dim == 1:
+            self.inputs = self.inputs[:, ~self.finished_mask()]
+        elif self.inputs_batch_dim == 2:
+            self.inputs = self.inputs[:, :, ~self.finished_mask()]
+        else:
+            raise NotImplementedError
 
         if not self.enc_mask is None:
             self.enc_mask = self.enc_mask[~self.finished_mask()]

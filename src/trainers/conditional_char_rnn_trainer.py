@@ -143,7 +143,7 @@ class ConditionalCharRNNTrainer(BaseTrainer):
             'eos_token': self.eos,
             'bos_token': self.eos, # We start decoding from eos. TODO: looks like a hack
             'max_len': 250,
-            'inputs_batch_first': False,
+            'inputs_batch_dim': 1,
             'kwargs': {'style': 1}
         }).inference()
         results = itos_many(results, self.vocab, sep='')
