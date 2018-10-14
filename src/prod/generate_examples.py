@@ -83,7 +83,7 @@ def score_ensemble():
             ensemble_weights=weights
         )
         output_file_path = 'ensemble-examples/{}-{}.txt'.format(*weights)
-        generate_dialogs('just-on-titles', predict_fn, output_file_path)
+        generate_dialogs('from-golds', predict_fn, output_file_path)
 
 
 def generate_dialogs(scheme, predict_fn, output_file_path):

@@ -15,7 +15,8 @@ from dialog_model import predict as generate_dialog
 from news import retrieve_random_dialog
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--port', '-p', help='Port number to use', dest='port', type=int, choices=range(10101,10109))
+parser.add_argument('--port', '-p', help='Port number to use',
+    dest='port', type=int, choices=range(10101,10109), required=True)
 args = parser.parse_args()
 
 
