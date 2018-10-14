@@ -1,12 +1,14 @@
 title: "DissoNet experiments"
 trainer: "DissoNetTrainer"
 data:
-  domain_x: "data/generated/classics.split.tok.5_50.common.bpe"
-  domain_y: "data/generated/news.ru.tok.5_50.common.bpe"
+  # domain_x: "data/generated/classics.split.tok.5_50.common.bpe"
+  # domain_y: "data/generated/news.ru.tok.5_50.common.bpe"
   # domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
   # domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
   # domain_x: "data/shakespeare/modern.tok"
   # domain_y: "data/shakespeare/original.tok"
+  domain_x: "data/generated/classic-dialogs.txt"
+  domain_y: "data/news/news.ru.train"
 max_num_epochs: 30
 val_freq_iters: 1000
 val_set_size: 1000

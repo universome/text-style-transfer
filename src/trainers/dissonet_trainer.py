@@ -21,7 +21,7 @@ from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.gan_losses import WCriticLoss, DiscriminatorLoss, wgan_gp
 from src.inference import simple_inference
 from src.utils.style_transfer import transfer_style, get_text_from_sents
-
+from src.utils.data_utils import char_tokenize
 
 class DissoNetTrainer(BaseTrainer):
     def __init__(self, config):
@@ -38,7 +38,7 @@ class DissoNetTrainer(BaseTrainer):
         with open(domain_x_data_path) as f: domain_x = f.read().splitlines()
         with open(domain_y_data_path) as f: domain_y = f.read().splitlines()
 
-        text = Field(init_token='<bos>', eos_token='<eos>', batch_first=True)
+        text = Field(init_token='<bos>', eos_token='|', batch_first=True, tokenize=char_tokenize)
         fields = [('domain_x', text), ('domain_y', text)]
         examples = [Example.fromlist([m,o], fields) for m,o in zip(domain_x, domain_y)]
         train_exs, val_exs = train_test_split(examples, test_size=self.config.val_set_size,
@@ -53,12 +53,11 @@ class DissoNetTrainer(BaseTrainer):
 
     def init_models(self):
         size = self.config.hp.size
-        voc_size = len(self.vocab)
         dropout_p = self.config.hp.dropout
         dropword_p = self.config.hp.dropword
 
-        self.encoder = RNNEncoder(size, size, voc_size, dropword_p)
-        self.decoder = RNNDecoder(size, size, voc_size, dropword_p)
+        self.encoder = RNNEncoder(size, size, self.vocab, dropword_p)
+        self.decoder = RNNDecoder(size, size, self.vocab, dropword_p)
         self.split_nn = SplitNN(size, self.config.hp.style_vec_size)
         self.motivator = FFN([self.config.hp.style_vec_size, 1], dropout=dropout_p)
         self.critic = FFN([size, size, 1], dropout=dropout_p)
@@ -154,6 +153,7 @@ class DissoNetTrainer(BaseTrainer):
         rec_losses = []
 
         for batch in self.val_dataloader:
+            batch = cudable(batch)
             with torch.enable_grad():
                 rec_loss, *_, losses_info = self.loss_on_batch(batch)
             rec_losses.append(rec_loss.item())
@@ -173,7 +173,7 @@ class DissoNetTrainer(BaseTrainer):
         Performs inference on a val dataloader
         (computes predictions without teacher's forcing)
         """
-        x2y, y2x, x2x, y2y, gx, gy = transfer_style(self.transfer_style_on_batch, self.val_dataloader, self.vocab)
+        x2y, y2x, x2x, y2y, gx, gy = transfer_style(self.transfer_style_on_batch, self.val_dataloader, self.vocab, sep='')
 
         x2y_bleu = compute_bleu_for_sents(x2y, gx)
         y2x_bleu = compute_bleu_for_sents(y2x, gy)
@@ -193,6 +193,8 @@ class DissoNetTrainer(BaseTrainer):
         self.writer.add_text('Generated examples', text, self.num_iters_done)
 
     def transfer_style_on_batch(self, batch):
+        batch = cudable(batch)
+
         state_x = self.encoder(batch.domain_x)
         state_y = self.encoder(batch.domain_y)
 
@@ -204,9 +206,9 @@ class DissoNetTrainer(BaseTrainer):
         state_x2x = self.merge_nn(content_x, style_x)
         state_y2y = self.merge_nn(content_y, style_y)
 
-        x2y = simple_inference(self.decoder, state_x2y, self.vocab)
-        y2x = simple_inference(self.decoder, state_y2x, self.vocab)
-        x2x = simple_inference(self.decoder, state_x2x, self.vocab)
-        y2y = simple_inference(self.decoder, state_y2y, self.vocab)
+        x2y = simple_inference(self.decoder, state_x2y, self.vocab, eos_token='|')
+        y2x = simple_inference(self.decoder, state_y2x, self.vocab, eos_token='|')
+        x2x = simple_inference(self.decoder, state_x2x, self.vocab, eos_token='|')
+        y2y = simple_inference(self.decoder, state_y2y, self.vocab, eos_token='|')
 
         return x2y, y2x, x2x, y2y
