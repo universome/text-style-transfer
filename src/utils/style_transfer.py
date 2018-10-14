@@ -1,7 +1,7 @@
 from src.utils.data_utils import itos_many
 
 
-def transfer_style(transfer_style_on_batch, dataloader, vocab):
+def transfer_style(transfer_style_on_batch, dataloader, vocab, sep=' '):
     """
     Produces predictions for a given dataloader
     """
@@ -24,12 +24,12 @@ def transfer_style(transfer_style_on_batch, dataloader, vocab):
         gold_domain_y.extend(batch.domain_y.detach().cpu().numpy().tolist())
 
     # Converting to sentences
-    x2y_sents = itos_many(domain_x_to_domain_y, vocab)
-    y2x_sents = itos_many(domain_y_to_domain_x, vocab)
-    x2x_sents = itos_many(domain_x_to_domain_x, vocab)
-    y2y_sents = itos_many(domain_y_to_domain_y, vocab)
-    gx_sents = itos_many(gold_domain_x, vocab)
-    gy_sents = itos_many(gold_domain_y, vocab)
+    x2y_sents = itos_many(domain_x_to_domain_y, vocab, sep=sep)
+    y2x_sents = itos_many(domain_y_to_domain_x, vocab, sep=sep)
+    x2x_sents = itos_many(domain_x_to_domain_x, vocab, sep=sep)
+    y2y_sents = itos_many(domain_y_to_domain_y, vocab, sep=sep)
+    gx_sents = itos_many(gold_domain_x, vocab, sep=sep)
+    gy_sents = itos_many(gold_domain_y, vocab, sep=sep)
 
     return x2y_sents, y2x_sents, x2x_sents, y2y_sents, gx_sents, gy_sents
 

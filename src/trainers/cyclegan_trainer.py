@@ -19,6 +19,7 @@ from src.losses.ce_without_pads import cross_entropy_without_pads
 from src.losses.gan_losses import WCriticLoss, WGeneratorLoss, wgan_gp
 from src.inference import simple_inference
 from src.utils.style_transfer import transfer_style, get_text_from_sents
+from src.utils.data_utils import char_tokenize
 from src.seq_noise import seq_noise
 
 
@@ -34,13 +35,14 @@ class CycleGANTrainer(BaseTrainer):
         with open(domain_x_data_path) as f: domain_x = f.read().splitlines()
         with open(domain_y_data_path) as f: domain_y = f.read().splitlines()
 
-        domain_x = [s for s in domain_x if self.config.hp.min_len <= len(s.split()) <= self.config.hp.max_len]
-        domain_y = [s for s in domain_y if self.config.hp.min_len <= len(s.split()) <= self.config.hp.max_len]
+        print('Dataset sizes:', len(domain_x), len(domain_y))
+        domain_x = [s for s in domain_x if self.config.hp.min_len <= len(s) <= self.config.hp.max_len]
+        domain_y = [s for s in domain_y if self.config.hp.min_len <= len(s) <= self.config.hp.max_len]
+        print('Dataset sizes after filtering:', len(domain_x), len(domain_y))
 
-        field = Field(init_token='<bos>', eos_token='<eos>', batch_first=True)
-        field_noised = Field(init_token='<bos>', eos_token='<eos>', batch_first=True, preprocessing=seq_noise)
+        field = Field(init_token='<bos>', eos_token='|', batch_first=True, tokenize=char_tokenize)
+        fields = [('domain_x', field), ('domain_y', field)]
 
-        fields = [('domain_x', field), ('domain_y', field), ('domain_x_noised', field_noised)]
         examples = [Example.fromlist([x,y,x], fields) for x,y in zip(domain_x, domain_y)]
         train_exs, val_exs = train_test_split(examples, test_size=self.config.val_set_size,
                                               random_state=self.config.random_seed)
@@ -257,7 +259,7 @@ class CycleGANTrainer(BaseTrainer):
         Performs inference on a val dataloader
         (computes predictions without teacher's forcing)
         """
-        x2y, y2x, x2x, y2y, gx, gy = transfer_style(self.transfer_style_on_batch, self.val_dataloader, self.vocab)
+        x2y, y2x, x2x, y2y, gx, gy = transfer_style(self.transfer_style_on_batch, self.val_dataloader, self.vocab, sep='')
 
         x2y_bleu = compute_bleu_for_sents(x2y, gx)
         y2x_bleu = compute_bleu_for_sents(y2x, gy)
@@ -288,10 +290,10 @@ class CycleGANTrainer(BaseTrainer):
         x2x_z = self.gen_y2x(x2y_z)
         y2y_z = self.gen_x2y(y2x_z)
 
-        x2y = simple_inference(self.decoder, x2y_z, self.vocab)
-        y2x = simple_inference(self.decoder, y2x_z, self.vocab)
-        x2x = simple_inference(self.decoder, x2x_z, self.vocab)
-        y2y = simple_inference(self.decoder, y2y_z, self.vocab)
+        x2y = simple_inference(self.decoder, x2y_z, self.vocab, eos_token='|')
+        y2x = simple_inference(self.decoder, y2x_z, self.vocab, eos_token='|')
+        x2x = simple_inference(self.decoder, x2x_z, self.vocab, eos_token='|')
+        y2y = simple_inference(self.decoder, y2y_z, self.vocab, eos_token='|')
 
         return x2y, y2x, x2x, y2y
 

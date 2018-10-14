@@ -5,16 +5,18 @@ data:
   # domain_y: "data/generated/news.ru.tok.5_50.common.bpe"
   # domain_x: "data/shakespeare/modern.tok"
   # domain_y: "data/shakespeare/original.tok"
-  domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
-  domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
+  domain_x: "data/yelp/yelp-positive-short.en"
+  domain_y: "data/yelp/yelp-negative-short.en"
+  # domain_x: "data/generated/classic-dialogs.txt"
+  # domain_y: "data/news/news.ru.train"
 max_num_epochs: 30
 val_freq_epochs: 1
 val_set_size: 500
-# val_freq_iters: 10
+# val_freq_iters: 1000
 # val_set_size: 100
 modules:
   models: ["encoder", "decoder", "critic_x", "critic_y", "gen_x2y", "gen_y2x"]
-  # optims: ["ae_optim", "critic_optim", "gen_optim"]
+  optims: ["ae_optim", "critic_optim", "gen_optim"]
 checkpoint:
   freq_epochs: 1
 random_seed: 42
@@ -30,8 +32,8 @@ hp:
   lp_loss_coef: 0.001
   p_norm: 2
   n_critic: 20
-  min_len: 5
-  max_len: 10
+  min_len: 10
+  max_len: 150
   noiseness: 0.1
   gen_n_rec_steps: 3
   critic_optim:

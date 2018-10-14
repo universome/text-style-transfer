@@ -157,12 +157,13 @@ class InferenceState:
         return self.finished
 
 
-def simple_inference(model, z, vocab, max_len=100):
+def simple_inference(model, z, vocab, max_len=100, eos_token='<eos>'):
     infered = InferenceState({
         'model': model,
         'inputs': z,
         'vocab': vocab,
-        'max_len': max_len
+        'max_len': max_len,
+        'eos_token': eos_token
     }).inference()
 
     infered = [x.cpu().numpy().tolist() for x in infered]
