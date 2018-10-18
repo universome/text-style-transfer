@@ -77,7 +77,7 @@ def build_predict_fn(model_dir:str, model_cls_name:str, inference_kwargs={}, ens
 
         lm = WeightedLMEnsemble(lms, ensemble_weights)
 
-    def predict(sentences:List[str], n_lines:int, temperature:float=1e-5):
+    def predict(sentences:List[str], n_lines:int, temperature:float=1e-5, max_len=MAX_LINE_LEN):
         "For each sentence generates `n_lines` lines sequentially to form a dialog"
         dialogs = [s for s in sentences] # Let's not mutate original list and copy it
         batch_size = len(dialogs)
@@ -106,12 +106,13 @@ def build_predict_fn(model_dir:str, model_cls_name:str, inference_kwargs={}, ens
                 'model': lm,
                 'inputs': z,
                 'vocab': field.vocab,
-                'max_len': MAX_LINE_LEN,
+                'max_len': max_len,
                 'bos_token': EOS_TOKEN, # We start infering a new reply when we see EOS
                 'eos_token': EOS_TOKEN,
                 'temperature': temperature,
                 'sample_type': 'sample',
                 'inputs_batch_dim': 1 if model_cls_name != 'WeightedLMEnsemble' else 2,
+                'substitute_inputs': True,
                 'kwargs': inference_kwargs
             }).inference()
 
@@ -156,7 +157,8 @@ def assign_speakers(dialog, speakers=('Bes', 'Borgy')):
 # classic_lm, classic_field = init_lm('classic_lm/config.yml', 'classic_lm/state')
 print('Loading default dialog model..')
 # predict = build_predict_fn('conditional_lm', 'ConditionalLM', {'style': 1})
-predict = build_predict_fn('fine_tuned_classic_lm', 'RNNLM')
+# predict = build_predict_fn('fine_tuned_classic_lm', 'RNNLM')
+predict = build_predict_fn('classic_lm', 'RNNLM', inference_kwargs={'return_z': True})
 # predict = build_predict_fn(None, 'WeightedLMEnsemble',
 #     ensemble_models=[('RNNLM', 'classic_lm'), ('RNNLM', 'overfitted_fine_tuned_classic_lm')],
 #     ensemble_weights=[0.5, 0.5]

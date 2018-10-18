@@ -32,6 +32,7 @@ class InferenceState:
         self.enc_mask = state_dict.get('enc_mask')
         self.should_stack_finished = state_dict.get('should_stack_finished', False)
         self.inputs_batch_dim = state_dict.get('inputs_batch_dim', 0)
+        self.substitute_inputs = state_dict.get('substitute_inputs', False)
         self.batch_size = self.inputs.size(self.inputs_batch_dim)
         self.active_seqs = state_dict.get('active_seqs', self.generate_active_seqs())
 
@@ -121,7 +122,15 @@ class InferenceState:
     def forward(self):
         # TODO: let's hard-code single encoder mask arg until we'll need something more general
         args = [] if self.enc_mask is None else self.enc_mask
-        next_tokens_dists = self.model(self.inputs, self.active_seqs, *args, **self.kwargs)[:, -1]
+
+        # TODO: this is really dirty
+        if self.substitute_inputs:
+            next_tokens_dists, inputs = self.model(self.inputs, self.active_seqs[:, self.num_steps_done:], *args, **self.kwargs)
+            next_tokens_dists = next_tokens_dists[:, -1]
+            self.inputs = inputs
+        else:
+            next_tokens_dists = self.model(self.inputs, self.active_seqs, *args, **self.kwargs)[:, -1]
+
         next_tokens = self.sample(next_tokens_dists)
 
         if self.gumbel:
@@ -143,7 +152,10 @@ class InferenceState:
         return self.next_tokens == self.eos_idx
 
     def inference(self):
-        for _ in range(self.max_len):
+        from tqdm import tqdm
+
+        for i in tqdm(range(self.max_len)):
+            self.num_steps_done = i
             self.forward()
             self.update_finished()
             self.update_active_seqs()

@@ -9,6 +9,8 @@ import torch
 from flask import Flask, request
 from flask_restful import Resource, Api, output_json
 
+assert torch.cuda.is_available() # Do not even try to start without GPU
+
 from style_model import predict as restyle
 from utils import validate
 from dialog_model import predict as generate_dialog
