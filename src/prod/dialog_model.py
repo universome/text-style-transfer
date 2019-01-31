@@ -23,8 +23,9 @@ from throwaway_models import CharLMFromEmbs, WeightedLMEnsemble
 
 # Some constants
 EOS_TOKEN = '|'
-MAX_LINE_LEN = 256
+DEFAULT_MAX_LINE_LEN = 256
 MAX_CONTEXT_SIZE = 512
+DEFAULT_TEMPERATURE = 1e-5
 MODEL_CLASSES = {
     'RNNLM': RNNLM,
     'ConditionalLM': ConditionalLM,
@@ -77,10 +78,12 @@ def build_predict_fn(model_dir:str, model_cls_name:str, inference_kwargs={}, ens
 
         lm = WeightedLMEnsemble(lms, ensemble_weights)
 
-    def predict(sentences:List[str], n_lines:int, temperature:float=1e-5, max_len=MAX_LINE_LEN):
+    def predict(sentences:List[str], n_lines:int, temperature:float=None, max_len:int=None):
         "For each sentence generates `n_lines` lines sequentially to form a dialog"
         dialogs = [s for s in sentences] # Let's not mutate original list and copy it
         batch_size = len(dialogs)
+        temperature = temperature or DEFAULT_TEMPERATURE
+        max_len = max_len or DEFAULT_MAX_LINE_LEN
 
         for _ in range(n_lines):
             examples = [Example.fromlist([EOS_TOKEN.join(d)], [('text', field)]) for d in dialogs]
@@ -130,7 +133,7 @@ def build_predict_fn(model_dir:str, model_cls_name:str, inference_kwargs={}, ens
 
 
 def slice_unfinished_sentence(s):
-    if len(s) < MAX_LINE_LEN: return s # Line was finished in this way by itself
+    if len(s) < DEFAULT_MAX_LINE_LEN: return s # Line was finished in this way by itself
     if s.rfind('.') == -1: return s # We can't properly finish this line
 
     return s[:s.rfind('.')+1]

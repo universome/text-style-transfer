@@ -67,6 +67,7 @@ class Dialog(Resource):
 
     def post(self):
         data = request.json
+        ALLOWED_KEYS = ['sentences', 'n_lines', 'temperature']
 
         if data is None:
             return {'error': 'You should send me json data!'}, 400
@@ -81,9 +82,15 @@ class Dialog(Resource):
 
         if not type(data['n_lines']) is int: return {'error': '`n_lines` must be an integer!'}, 400
         if not 0 < data['n_lines'] <= 100: return {'error': '`n_lines` must be between 1 and 100!'}, 400
+        if not all(k in ALLOWED_KEYS for k in data): return {'error': 'some keys are not known'}, 400
 
         try:
-            return {'result': generate_dialog(data['sentences'], data['n_lines'])}
+            return {'result': generate_dialog(
+                data['sentences'],
+                data['n_lines'],
+                temperature=data.get('temperature'),
+                max_len=data.get('max_len')
+            )}
         except Exception:
             traceback.print_exc()
             torch.cuda.empty_cache()
