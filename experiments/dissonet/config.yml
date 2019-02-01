@@ -28,7 +28,6 @@ hp:
   dropout: 0.1
   dropword: 0.1
   lr: 0.001
-  gp_lambda: 10
   motivator_coef: 0.1
   style_vec_size: 32
   critic_loss_threshold: -5

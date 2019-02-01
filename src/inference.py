@@ -152,9 +152,7 @@ class InferenceState:
         return self.next_tokens == self.eos_idx
 
     def inference(self):
-        from tqdm import tqdm
-
-        for i in tqdm(range(self.max_len)):
+        for i in range(self.max_len):
             self.num_steps_done = i
             self.forward()
             self.update_finished()
