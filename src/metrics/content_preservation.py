@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from firelab.config import Config
-from firelab.training_utils import cudable
 
 
 INFERSENT_PARAMS = {
@@ -32,21 +31,22 @@ class ContentPreservation:
     def load_infersent_model(self) -> nn.Module:
         # TODO: This module should not know such high-level info...
         project_path = self.config.firelab.project_path
-        repo_path = os.path.join(project_path, self.config.infersent.repo_path)
-        model_pkl_path = os.path.join(project_path, self.config.infersent.model_pkl_path)
-        fasttext_w2v_path = os.path.join(project_path, self.config.infersent.fasttext_w2v_path)
+        infersent_config = self.config.metrics.infersent
+        repo_path = os.path.join(project_path, infersent_config.repo_path)
+        model_path = os.path.join(project_path, infersent_config.model_path)
+        fasttext_path = os.path.join(project_path, infersent_config.fasttext_path)
 
         # TODO: Is there any other way to load model class?
         sys.path.append(os.path.dirname(repo_path))
         from infersent.models import InferSent
 
-        print('Loading InferSent model', end='')
+        print('Loading InferSent model...', end='')
         model = InferSent(INFERSENT_PARAMS).to(self.config.device_name)
-        model.load_state_dict(torch.load(model_pkl_path))
+        model.load_state_dict(torch.load(model_path))
         print('Done!')
 
-        print('Loading fastText embeddings', end='')
-        model.set_w2v_path(fasttext_w2v_path)
+        print('Loading fastText embeddings...', end='')
+        model.set_w2v_path(fasttext_path)
         print('Done!')
 
         print('Building vocab...', end='')
@@ -65,4 +65,7 @@ class ContentPreservation:
         embeddings_pred = self.model.encode(predicted, tokenize=True)
         embeddings_trg = self.model.encode(targets, tokenize=True)
 
-        return 1 - F.cosine_similarity(embeddings_pred, embeddings_trg)
+        embeddings_pred = torch.Tensor(embeddings_pred).to(self.config.device_name)
+        embeddings_trg = torch.Tensor(embeddings_trg).to(self.config.device_name)
+
+        return (1 - F.cosine_similarity(embeddings_pred, embeddings_trg)).mean()

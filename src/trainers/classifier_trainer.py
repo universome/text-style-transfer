@@ -6,8 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.optim import Adam
-from torchtext import data
-from torchtext.data import Field, Dataset, Example
+from torchtext.data import Field, Dataset, Example, BucketIterator
 from firelab import BaseTrainer
 from firelab.utils.training_utils import cudable
 from sklearn.model_selection import train_test_split
@@ -40,8 +39,10 @@ class ClassifierTrainer(BaseTrainer):
         text.build_vocab(self.train_ds, max_size=self.config.hp.get('max_vocab_size'))
 
         self.vocab = text.vocab
-        self.train_dataloader = data.BucketIterator(self.train_ds, batch_size, repeat=False)
-        self.val_dataloader = data.BucketIterator(self.val_ds, batch_size, repeat=False, shuffle=False)
+        self.train_dataloader = BucketIterator(
+            self.train_ds, batch_size, repeat=False, device=self.config.device_name)
+        self.val_dataloader = BucketIterator(
+            self.val_ds, batch_size, repeat=False, shuffle=False, device=self.config.device_name)
 
     def init_models(self):
         self.classifier = cudable(RNNClassifier(self.config.hp.model_size, self.vocab))

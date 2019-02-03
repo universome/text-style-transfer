@@ -1,25 +1,47 @@
 title: "CycleGAN for text style transfer experiments"
 trainer: "CycleGANTrainer"
 data:
-  # domain_x: "data/generated/classics.split.tok.5_50.common.bpe"
-  # domain_y: "data/generated/news.ru.tok.5_50.common.bpe"
-  # domain_x: "data/shakespeare/modern.tok"
-  # domain_y: "data/shakespeare/original.tok"
-  domain_x: "data/yelp/yelp-positive-short.en"
-  domain_y: "data/yelp/yelp-negative-short.en"
-  # domain_x: "data/generated/classic-dialogs.txt"
-  # domain_y: "data/news/news.ru.train"
-max_num_epochs: 30
-val_freq_epochs: 1
+  domain_x: "data/shakespeare/modern.tok"
+  domain_y: "data/shakespeare/original.tok"
+  # domain_x: "data/yelp/yelp-positive-short.en"
+  # domain_y: "data/yelp/yelp-negative-short.en"
+
+random_seed: 42
+max_num_epochs: 5
+
+# validation:
+#   freq_epochs: 1
+#   set_size: 500
+#   # freq_iters: 1000
+#   # set_size: 100
+# val_freq_epochs: 1
+val_freq_iters: 10
 val_set_size: 500
-# val_freq_iters: 1000
-# val_set_size: 100
+
+checkpoint:
+  freq_epochs: 1
+
 modules:
   models: ["encoder", "decoder", "critic_x", "critic_y", "gen_x2y", "gen_y2x"]
   optims: ["ae_optim", "critic_optim", "gen_optim"]
-checkpoint:
-  freq_epochs: 1
-random_seed: 42
+
+metrics:
+  classifier:
+    model_path: "models/classifier.pth"
+    vocab_path: "models/classifier-vocab.pickle"
+    batch_size: 128
+    hp:
+      model_size: 512
+  infersent:
+    repo_path: "ext-libs/infersent"
+    model_path: "models/infersent2.pkl"
+    fasttext_path: "models/fasttext-crawl-300d-2M.vec"
+
+# hpo:
+#   grid:
+#     dropout: [0.1, 0.5]
+#     lr: [0.001, 0.01]
+
 hp:
   model_size: 1024
   batch_size: 128

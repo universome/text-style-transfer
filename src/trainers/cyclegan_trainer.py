@@ -21,6 +21,7 @@ from src.inference import simple_inference
 from src.utils.style_transfer import transfer_style, get_text_from_sents
 from src.utils.data_utils import char_tokenize
 from src.seq_noise import seq_noise
+from src.metrics import TransferStrength, ContentPreservation
 
 
 class CycleGANTrainer(BaseTrainer):
@@ -72,6 +73,9 @@ class CycleGANTrainer(BaseTrainer):
         # GAN from Y to X
         self.gen_y2x = cudable(Generator(size, self.config.hp.gen_n_rec_steps))
         self.critic_x = cudable(create_critic())
+
+        self.transfer_strength = TransferStrength(self.config)
+        self.content_preservation = ContentPreservation(self.config)
 
     def init_criterions(self):
         self.rec_criterion = cross_entropy_without_pads(self.vocab)
@@ -261,6 +265,12 @@ class CycleGANTrainer(BaseTrainer):
         """
         x2y, y2x, x2x, y2y, gx, gy = transfer_style(self.transfer_style_on_batch, self.val_dataloader, self.vocab, sep='')
 
+        self.log_bleu_scores(x2y, y2x, x2x, y2y, gx, gy)
+        self.log_content_preservation_scores(x2y, y2x, x2x, y2y, gx, gy)
+        self.log_transfer_strength_scores(x2y, y2x, x2x, y2y, gx, gy)
+        self.log_examples(x2y, y2x, x2x, y2y, gx, gy)
+
+    def log_bleu_scores(self, x2y, y2x, x2x, y2y, gx, gy):
         x2y_bleu = compute_bleu_for_sents(x2y, gx)
         y2x_bleu = compute_bleu_for_sents(y2x, gy)
         x2x_bleu = compute_bleu_for_sents(x2x, gx)
@@ -271,7 +281,33 @@ class CycleGANTrainer(BaseTrainer):
         self.writer.add_scalar('VAL_BLEU/x2x', x2x_bleu, self.num_iters_done)
         self.writer.add_scalar('VAL_BLEU/y2y', y2y_bleu, self.num_iters_done)
 
-        # Ok, let's log generated sequences
+    def log_content_preservation_scores(self, x2y, y2x, x2x, y2y, gx, gy):
+        cp_scores_x2y = self.content_preservation.score(x2y, gx)
+        cp_scores_y2x = self.content_preservation.score(y2x, gy)
+        cp_scores_x2x = self.content_preservation.score(x2x, gx)
+        cp_scores_y2y = self.content_preservation.score(y2y, gy)
+
+        self.writer.add_scalar('VAL/content_preservation/x2y', cp_scores_x2y, self.num_iters_done)
+        self.writer.add_scalar('VAL/content_preservation/y2x', cp_scores_y2x, self.num_iters_done)
+        self.writer.add_scalar('VAL/content_preservation/x2x', cp_scores_x2x, self.num_iters_done)
+        self.writer.add_scalar('VAL/content_preservation/y2y', cp_scores_y2y, self.num_iters_done)
+
+    def log_transfer_strength_scores(self, x2y, y2x, x2x, y2y, gx, gy):
+        ts_scores_x2y = self.transfer_strength.score(x2y)
+        ts_scores_y2x = 1 - self.transfer_strength.score(y2x)
+        ts_scores_x2x = 1 - self.transfer_strength.score(x2x)
+        ts_scores_y2y = self.transfer_strength.score(y2y)
+        ts_scores_gx = 1 - self.transfer_strength.score(gx)
+        ts_scores_gy = self.transfer_strength.score(gy)
+
+        self.writer.add_scalar('VAL/transfer_strength/x2y', ts_scores_x2y, self.num_iters_done)
+        self.writer.add_scalar('VAL/transfer_strength/y2x', ts_scores_y2x, self.num_iters_done)
+        self.writer.add_scalar('VAL/transfer_strength/x2x', ts_scores_x2x, self.num_iters_done)
+        self.writer.add_scalar('VAL/transfer_strength/y2y', ts_scores_y2y, self.num_iters_done)
+        self.writer.add_scalar('VAL/transfer_strength/gx', ts_scores_gx, self.num_iters_done)
+        self.writer.add_scalar('VAL/transfer_strength/gy', ts_scores_gy, self.num_iters_done)
+
+    def log_examples(self, x2y, y2x, x2x, y2y, gx, gy):
         texts = [get_text_from_sents(*sents) for sents in zip(x2y, y2x, x2x, y2y, gx, gy)]
         texts = texts[:10] # Let's not display all the texts
         text = '\n===================\n'.join(texts)

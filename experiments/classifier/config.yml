@@ -1,20 +1,21 @@
 title: "Trying to classify domains"
 trainer: "ClassifierTrainer"
 data:
-  domain_x: "data/generated/classics.split.tok.5_50.common.bpe"
-  domain_y: "data/generated/news.ru.tok.5_50.common.bpe"
   # domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
   # domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
-  # domain_x: "data/shakespeare/modern.tok"
-  # domain_y: "data/shakespeare/original.tok"
-max_num_epochs: 30
-val_freq_iters: 1000
+  domain_x: "data/shakespeare/modern.tok"
+  domain_y: "data/shakespeare/original.tok"
+max_num_epochs: 3
+val_freq_iters: 100
 val_set_size: 1000
 # val_freq_iters: 10
 # val_set_size: 100
 modules:
   models: ["classifier"]
   optims: ["optim"]
+checkpoint:
+  freq_epochs: 1
+  pickle: ["vocab"]
 random_seed: 42
 early_stopping:
   loss: "val_loss"
