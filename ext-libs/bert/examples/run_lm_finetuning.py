@@ -23,6 +23,7 @@ import os
 import logging
 import argparse
 from tqdm import tqdm, trange
+from typing import Set
 
 import numpy as np
 import torch
@@ -49,7 +50,7 @@ def warmup_linear(x, warmup=0.002):
 
 
 class BERTDataset(Dataset):
-    def __init__(self, corpus_path, tokenizer, seq_len, encoding="utf-8", corpus_lines=None, on_memory=True):
+    def __init__(self, corpus_path, tokenizer, seq_len, negative_words_path, positive_words_path, encoding="utf-8", corpus_lines=None, on_memory=True):
         self.vocab = tokenizer.vocab
         self.tokenizer = tokenizer
         self.seq_len = seq_len
@@ -114,6 +115,9 @@ class BERTDataset(Dataset):
             self.file = open(corpus_path, "r", encoding=encoding)
             self.random_file = open(corpus_path, "r", encoding=encoding)
 
+        self.neg_words = set([w.lower() for w in open(negative_words_path).read().splitlines()])
+        self.pos_words = set([w.lower() for w in open(positive_words_path).read().splitlines()])
+
     def __len__(self):
         # last line of doc won't be used, because there's no "nextSentence". Additionally, we start counting at 0.
         return self.corpus_lines - self.num_docs - 1
@@ -137,7 +141,8 @@ class BERTDataset(Dataset):
         cur_example = InputExample(guid=cur_id, tokens_a=tokens_a, tokens_b=tokens_b, is_next=is_next_label)
 
         # transform sample to features
-        cur_features = convert_example_to_features(cur_example, self.seq_len, self.tokenizer)
+        cur_features = convert_example_to_features(cur_example, self.seq_len, self.tokenizer,
+                                                   self.neg_words, self.pos_words)
 
         cur_tensors = (torch.tensor(cur_features.input_ids),
                        torch.tensor(cur_features.input_mask),
@@ -273,7 +278,7 @@ class InputFeatures(object):
         self.lm_label_ids = lm_label_ids
 
 
-def random_word(tokens, tokenizer):
+def random_word(tokens, tokenizer, neg_words:Set[str], pos_words:Set[str]):
     """
     Masking some random tokens for Language Model task with probabilities as in the original BERT paper.
     :param tokens: list of str, tokenized sentence.
@@ -283,10 +288,9 @@ def random_word(tokens, tokenizer):
     output_label = []
 
     for i, token in enumerate(tokens):
-        prob = random.random()
         # mask token with 15% probability
-        if prob < 0.15:
-            prob /= 0.15
+        if token in neg_words:
+            prob = random.random()
 
             # 80% randomly change token to mask token
             if prob < 0.8:
@@ -312,7 +316,8 @@ def random_word(tokens, tokenizer):
     return tokens, output_label
 
 
-def convert_example_to_features(example, max_seq_length, tokenizer):
+def convert_example_to_features(example, max_seq_length, tokenizer,
+                                neg_words:Set[str], pos_words:Set[str]):
     """
     Convert a raw sample (pair of sentences as tokenized strings) into a proper training sample with
     IDs, LM labels, input_mask, CLS and SEP tokens etc.
@@ -328,8 +333,8 @@ def convert_example_to_features(example, max_seq_length, tokenizer):
     # Account for [CLS], [SEP], [SEP] with "- 3"
     _truncate_seq_pair(tokens_a, tokens_b, max_seq_length - 3)
 
-    tokens_a, t1_label = random_word(tokens_a, tokenizer)
-    tokens_b, t2_label = random_word(tokens_b, tokenizer)
+    tokens_a, t1_label = random_word(tokens_a, tokenizer, neg_words, pos_words)
+    tokens_b, t2_label = random_word(tokens_b, tokenizer, neg_words, pos_words)
     # concatenate lm labels and account for CLS, SEP, SEP
     lm_label_ids = ([-1] + t1_label + [-1] + t2_label + [-1])
 
@@ -484,6 +489,8 @@ def main():
                         help = "Loss scaling to improve fp16 numeric stability. Only used when fp16 set to True.\n"
                         "0 (default value): dynamic loss scaling.\n"
                         "Positive power of 2: static loss scaling value.\n")
+    parser.add_argument('--negative_words_path', type=str)
+    parser.add_argument('--positive_words_path', type=str)
 
     args = parser.parse_args()
 
@@ -524,8 +531,8 @@ def main():
     num_train_steps = None
     if args.do_train:
         print("Loading Train Dataset", args.train_file)
-        train_dataset = BERTDataset(args.train_file, tokenizer, seq_len=args.max_seq_length,
-                                    corpus_lines=None, on_memory=args.on_memory)
+        train_dataset = BERTDataset(args.train_file, tokenizer, args.max_seq_length, args.negative_words_path,
+                                    args.positive_words_path, corpus_lines=None, on_memory=args.on_memory)
         num_train_steps = int(
             len(train_dataset) / args.train_batch_size / args.gradient_accumulation_steps * args.num_train_epochs)
 
