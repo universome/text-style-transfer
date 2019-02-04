@@ -276,10 +276,10 @@ class CycleGANTrainer(BaseTrainer):
         x2x_bleu = compute_bleu_for_sents(x2x, gx)
         y2y_bleu = compute_bleu_for_sents(y2y, gy)
 
-        self.writer.add_scalar('VAL_BLEU/x2y', x2y_bleu, self.num_iters_done)
-        self.writer.add_scalar('VAL_BLEU/y2x', y2x_bleu, self.num_iters_done)
-        self.writer.add_scalar('VAL_BLEU/x2x', x2x_bleu, self.num_iters_done)
-        self.writer.add_scalar('VAL_BLEU/y2y', y2y_bleu, self.num_iters_done)
+        self.writer.add_scalar('VAL/x2y', x2y_bleu, self.num_iters_done)
+        self.writer.add_scalar('VAL/y2x', y2x_bleu, self.num_iters_done)
+        self.writer.add_scalar('VAL/x2x', x2x_bleu, self.num_iters_done)
+        self.writer.add_scalar('VAL/y2y', y2y_bleu, self.num_iters_done)
 
     def log_content_preservation_scores(self, x2y, y2x, x2x, y2y, gx, gy):
         cp_scores_x2y = self.content_preservation.score(x2y, gx)

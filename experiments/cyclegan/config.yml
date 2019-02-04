@@ -1,13 +1,13 @@
 title: "CycleGAN for text style transfer experiments"
 trainer: "CycleGANTrainer"
 data:
-  domain_x: "data/shakespeare/modern.tok"
-  domain_y: "data/shakespeare/original.tok"
-  # domain_x: "data/yelp/yelp-positive-short.en"
-  # domain_y: "data/yelp/yelp-negative-short.en"
+  # domain_x: "data/shakespeare/modern.tok"
+  # domain_y: "data/shakespeare/original.tok"
+  domain_x: "data/yelp/yelp-positive-short.en"
+  domain_y: "data/yelp/yelp-negative-short.en"
 
 random_seed: 42
-max_num_epochs: 5
+max_num_epochs: 30
 
 # validation:
 #   freq_epochs: 1
@@ -37,10 +37,12 @@ metrics:
     model_path: "models/infersent2.pkl"
     fasttext_path: "models/fasttext-crawl-300d-2M.vec"
 
-# hpo:
-#   grid:
-#     dropout: [0.1, 0.5]
-#     lr: [0.001, 0.01]
+hpo:
+  grid:
+    lr: [0.001, 0.005]
+    p_norm: [1, 2]
+    gp_lambda: [10, 100]
+    ae_pretraining_n_epochs: [1, 5]
 
 hp:
   model_size: 1024
