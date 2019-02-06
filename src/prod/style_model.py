@@ -57,7 +57,8 @@ def predict(lines):
 
     for batch in dataloader:
         # Generating predictions
-        batch = cudable(batch)
+        batch.src = cudable(batch.src)
+        batch.trg = cudable(batch.trg)
         morphs = morph_chars_idx(batch.trg, field.vocab)
         morphs = cudable(torch.from_numpy(morphs).float())
         first_chars_embs = decoder.embed(batch.trg[:, :n_first_chars])

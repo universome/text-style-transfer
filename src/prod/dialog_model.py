@@ -43,20 +43,20 @@ def init_lm(config_path, state_path, model_cls_name:str):
     field.vocab = pickle.load(open(get_path('vocab', 'pickle'), 'rb'))
 
     print('Loading models..')
-    location = None if torch.cuda.is_available() else 'cpu'
+    device = None if torch.cuda.is_available() else 'cpu'
 
     if model_cls is RNNLM:
         lm = cudable(RNNLM(hp.model_size, field.vocab, n_layers=hp.n_layers)).eval()
-        lm.load_state_dict(torch.load(get_path('lm'), map_location=location))
+        lm.load_state_dict(torch.load(get_path('lm'), map_location=device))
     elif model_cls is ConditionalLM:
         lm = cudable(ConditionalLM(hp.model_size, field.vocab)).eval()
-        lm.load_state_dict(torch.load(get_path('lm'), map_location=location))
+        lm.load_state_dict(torch.load(get_path('lm'), map_location=device))
     elif model_cls is CharLMFromEmbs:
         rnn_lm = cudable(RNNLM(hp.model_size, field.vocab, n_layers=hp.n_layers))
         style_embed = cudable(nn.Embedding(2, hp.model_size))
 
-        rnn_lm.load_state_dict(torch.load(get_path('lm'), map_location=location))
-        style_embed.load_state_dict(torch.load(get_path('style_embed'), map_location=location))
+        rnn_lm.load_state_dict(torch.load(get_path('lm'), map_location=device))
+        style_embed.load_state_dict(torch.load(get_path('style_embed'), map_location=device))
 
         lm = cudable(CharLMFromEmbs(rnn_lm, style_embed, n_layers=hp.n_layers)).eval()
     else:
@@ -89,8 +89,8 @@ def build_predict_fn(model_dir:str, model_cls_name:str, inference_kwargs={}, ens
             examples = [Example.fromlist([EOS_TOKEN.join(d)], [('text', field)]) for d in dialogs]
             dataset = Dataset(examples, [('text', field)])
             dataloader = data.BucketIterator(dataset, batch_size, shuffle=False, repeat=False)
-            batch = cudable(next(iter(dataloader))) # We have a single batch
-            text = batch.text[:, -MAX_CONTEXT_SIZE:] # As we made pad_first we are not afraid of losing information
+            batch = next(iter(dataloader)) # We have a single batch
+            text = cudable(batch.text[:, -MAX_CONTEXT_SIZE:]) # As we made pad_first we are not afraid of losing information
 
             if model_cls_name == 'CharLMFromEmbs':
                 z = lm.init_z(text.size(0), 1)
