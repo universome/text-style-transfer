@@ -3,6 +3,7 @@
 import  re
 import sys
 from typing import List
+from collections import Counter
 
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
@@ -102,7 +103,7 @@ def filter_dialogs_in_classics(input_data_path: str, output_data_path: str):
     print('Done!')
 
 
-def dialogs_from_lines(input_data_path: str, output_data_path: str, n_lines: int, eos: str, n_dialogs: int):
+def dialogs_from_lines(input_data_path:str, output_data_path:str, n_lines: int, eos:str, n_dialogs:int):
     n_lines, n_dialogs = int(n_lines), int(n_dialogs) # TODO: argparse?
 
     print('Reading data...')
@@ -118,7 +119,31 @@ def dialogs_from_lines(input_data_path: str, output_data_path: str, n_lines: int
     print('Done!')
 
 
-def main(cmd, *args):
+def generate_sentiment_words(neg_input_path:str, pos_input_path:str,
+                             neg_output_path:str, pos_output_path:str,
+                             keep_n_most_popular_words:int=3000):
+    print('Reading data...')
+    neg_lines = read_corpus(neg_input_path)
+    pos_lines = read_corpus(pos_input_path)
+
+    print('Counting words')
+    neg_counter = Counter([w.lower() for s in tqdm(neg_lines) for w in s.split()])
+    pos_counter = Counter([w.lower() for s in tqdm(pos_lines) for w in s.split()])
+
+    print('Getting most popular')
+    neg_top_words = set(w for w, _ in neg_counter.most_common(keep_n_most_popular_words))
+    pos_top_words = set(w for w, _ in pos_counter.most_common(keep_n_most_popular_words))
+
+    only_neg_top_words = neg_top_words - pos_top_words
+    only_pos_top_words = pos_top_words - neg_top_words
+
+    print('Saving')
+    save_corpus(list(only_neg_top_words), neg_output_path)
+    save_corpus(list(only_pos_top_words), pos_output_path)
+    print('Done!')
+
+
+def main(cmd:str, *args):
     if cmd == 'subs-open-nmt':
         prepare_subs_for_open_nmt(*args)
     elif cmd == 'word-filling':
@@ -129,6 +154,8 @@ def main(cmd, *args):
         filter_dialogs_in_classics(*args)
     elif cmd == 'dialogs-from-lines':
         dialogs_from_lines(*args)
+    elif cmd == 'generate-sentiment-words':
+        generate_sentiment_words(*args)
     else:
         raise NotImplementedError
 
