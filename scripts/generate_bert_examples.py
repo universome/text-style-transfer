@@ -13,6 +13,7 @@ model = BertForMaskedLM.from_pretrained('bert-models/negative-fine-tuned-uncased
 # model = BertForMaskedLM.from_pretrained('bert-base-uncased').to(device)
 model.eval()
 positive_words = set([w.lower() for w in open('data/generated/words-positive.txt').read().splitlines()])
+# positive_words = set([w.lower() for w in open('data/generated/words-positive-yelp.txt').read().splitlines()])
 
 
 def predict(sentence_pairs:str) -> str:
@@ -63,10 +64,10 @@ def predict(sentence_pairs:str) -> str:
 
 
 def main():
-    sentences = open('data/yelp/yelp-positive-short.en').read().splitlines()
-    sentences = list(filter(len, sentences))
-    sentences = sentences[:50]
-    sentence_pairs = [(a, b) for a, b in zip(sentences[:-1], sentences[1:])]
+    docs = open('data/yelp/bert-positive.txt').read().split('\n\n')
+    sentence_pairs = [tuple(d.splitlines()[:2]) for d in docs]
+    sentence_pairs = [p for p in sentence_pairs if len(p) >= 2]
+    sentence_pairs = sentence_pairs[:50]
     # sentence_pairs = [("What a peaceful place .", "I love going here every day .")]
     # sentence_pairs = [("Who was Jim Henson ?", "Jim Henson was a puppeteer")]
     predict(sentence_pairs)
