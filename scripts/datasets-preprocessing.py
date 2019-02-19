@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 
-import  re
+import re
 import sys
+import random
 from typing import List
 from collections import Counter
+
+random.seed(42)
 
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
@@ -74,7 +77,7 @@ def filter_subs(input_data_path: str, output_data_path: str):
 
 
 def filter_dialogs_in_classics(input_data_path: str, output_data_path: str):
-    SPEC_DASH = '–' # Medium dash char
+    SPEC_DASH = '–' # Medium dash char. It is different from (normal) dash "-".
 
     def filter_direct_speech(s):
         parts = s.split(SPEC_DASH)
@@ -143,6 +146,42 @@ def generate_sentiment_words(neg_input_path:str, pos_input_path:str,
     print('Done!')
 
 
+def cut_long_dialogs(data_path:str, output_path:str, max_len:int=128):
+    print('Reading data...')
+    data = read_corpus(data_path)
+
+    print('Splitting dialogs...')
+    dialogs = [d.split('|') for d in data]
+    print('Cutting data...')
+    dialogs = [cut_dialog(d, max_len) for d in tqdm(dialogs)]
+    num_dialogs_before = len(dialogs)
+
+    print('Saving data...')
+    dialogs = list(filter(len, dialogs))
+    save_corpus(dialogs, output_path)
+    print('Done! Num dialogs reduced: {} -> {}'.format(num_dialogs_before, len(dialogs)))
+
+
+def cut_dialog(dialog:List[str], max_len:int) -> str:
+    dialog = [cut_line(s, max_len) for s in dialog]
+    dialog = dialog if all(dialog) else []
+    dialog = '|'.join(dialog) + '|'
+
+    return dialog
+
+
+def cut_line(line:str, max_len:int) -> str:
+    if len(line) <= max_len: return line
+
+    ending_tokens = ('.', '!', '?')
+    end = max([line.rfind(t) for t in ending_tokens])
+
+    if end == -1:
+        print('Going to empty line:', line)
+
+    return '' if end == -1 else line[:end + 1]
+
+
 def main(cmd:str, *args):
     if cmd == 'subs-open-nmt':
         prepare_subs_for_open_nmt(*args)
@@ -156,6 +195,8 @@ def main(cmd:str, *args):
         dialogs_from_lines(*args)
     elif cmd == 'generate-sentiment-words':
         generate_sentiment_words(*args)
+    elif cmd == 'cut-long-dialogs':
+        cut_long_dialogs(*args)
     else:
         raise NotImplementedError
 
