@@ -25,7 +25,7 @@ from throwaway_models import CharLMFromEmbs, WeightedLMEnsemble
 EOS_TOKEN = '|'
 DEFAULT_MAX_LINE_LEN = 256
 MAX_CONTEXT_SIZE = 512
-DEFAULT_TEMPERATURE = 1e-5
+DEFAULT_TEMPERATURE = 0.25
 MODEL_CLASSES = {
     'RNNLM': RNNLM,
     'ConditionalLM': ConditionalLM,
@@ -161,7 +161,7 @@ def assign_speakers(dialog, speakers=('Bes', 'Borgy')):
 print('Loading default dialog model..')
 # predict = build_predict_fn('conditional_lm', 'ConditionalLM', {'style': 1})
 # predict = build_predict_fn('fine_tuned_classic_lm', 'RNNLM')
-predict = build_predict_fn('classic_lm', 'RNNLM', inference_kwargs={'return_z': True})
+predict = build_predict_fn('models/classic-lm', 'RNNLM', inference_kwargs={'return_z': True})
 # predict = build_predict_fn(None, 'WeightedLMEnsemble',
 #     ensemble_models=[('RNNLM', 'classic_lm'), ('RNNLM', 'overfitted_fine_tuned_classic_lm')],
 #     ensemble_weights=[0.5, 0.5]

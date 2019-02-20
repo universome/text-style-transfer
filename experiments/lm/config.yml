@@ -1,0 +1,26 @@
+title: "Language Model"
+trainer: "LMTrainer"
+data:
+  domain_x: "data/yelp/yelp-positive-short.en.tok.bpe"
+  domain_y: "data/yelp/yelp-negative-short.en.tok.bpe"
+  # domain_x: "data/shakespeare/modern.tok"
+  # domain_y: "data/shakespeare/original.tok"
+max_num_epochs: 10
+val_freq_iters: 100
+val_set_size: 1000
+modules:
+  models: ["classifier"]
+  optims: ["optim"]
+checkpoint:
+  freq_epochs: 1
+  pickle: ["vocab"]
+random_seed: 42
+early_stopping:
+  loss: "val_loss"
+  history_length: 5
+  should_decrease: true
+hp:
+  batch_size: 256
+  lr: 0.001
+  transformer:
+    model_size: 512

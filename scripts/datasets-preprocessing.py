@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 import re
 import sys
 import random
@@ -12,6 +13,16 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 from utils import read_corpus, save_corpus
+
+SPEC_DASH = '–' # Medium dash char. It is different from (normal) dash "-".
+# DIALOG_SEPARATORS = ('–', '—') # medium / long dashes (they are different symbols, although looks the same in IDE)
+
+def filter_direct_speech(s):
+    parts = s.split(SPEC_DASH)
+    s =  ' '.join([parts[i] for i in range(len(parts)) if i % 2 == 1]).strip()
+    s = s if s[-1] != ',' else s[:-1] + '.' # Replacing last ',' with '.'
+
+    return s
 
 
 def prepare_subs_for_open_nmt(data_path):
@@ -77,15 +88,6 @@ def filter_subs(input_data_path: str, output_data_path: str):
 
 
 def filter_dialogs_in_classics(input_data_path: str, output_data_path: str):
-    SPEC_DASH = '–' # Medium dash char. It is different from (normal) dash "-".
-
-    def filter_direct_speech(s):
-        parts = s.split(SPEC_DASH)
-        s =  ' '.join([parts[i] for i in range(len(parts)) if i % 2 == 1]).strip()
-        s = s if s[-1] != ',' else s[:-1] + '.' # Replacing last ',' with '.'
-
-        return s
-
     print('Reading data...')
     classics = read_corpus(input_data_path)
 
@@ -182,6 +184,63 @@ def cut_line(line:str, max_len:int) -> str:
     return '' if end == -1 else line[:end + 1]
 
 
+def extract_dialogs_texts(data_dir:str, out_path:str):
+    text_names = os.listdir(os.path.join(data_dir))
+
+    with open(out_path, 'w') as out_file:
+        for text_name in tqdm(text_names):
+            text = open(os.path.join(data_dir, text_name)).read().splitlines()
+            dialogs = extract_dialogs(text)
+
+            for d in dialogs:
+                out_file.write(d + '\n')
+
+
+def extract_dialogs(corpus:List[str]) -> List[str]:
+    dialogs = []
+    curr_dialog_start = 0
+    dialog_is_active = False
+
+    for i, line in enumerate(corpus):
+        if line.strip().startswith(SPEC_DASH):
+            if dialog_is_active:
+                continue
+            else:
+                # Activate dialog
+                curr_dialog_start = i
+                dialog_is_active = True
+        else:
+            if dialog_is_active:
+                # Stopping dialog
+                dialog = corpus[curr_dialog_start:i]
+                dialog = [filter_direct_speech(s) for s in dialog]
+
+                # We separate dialog lines with pipes so we can separate dialogs with "\n"
+                # It's better than separating dialogs with double "\n\n"
+                dialog = '|'.join(dialog)
+                dialogs.append(dialog)
+                dialog_is_active = False
+            else:
+                continue
+
+    return dialogs
+
+
+def restructure_taiga_proza_ru_texts(texts_path:str, out_dir:str):
+    years = os.listdir(texts_path)
+
+    for year in years:
+        for month in tqdm(os.listdir(os.path.join())):
+            dir = os.path.join(texts_path, year, month)
+
+            for text_name in os.listdir(dir):
+                path_from = os.path.join(dir, text_name)
+                path_to = os.path.join(out_dir, text_name)
+                os.rename(path_from, path_to)
+
+    print('Done!')
+
+
 def main(cmd:str, *args):
     if cmd == 'subs-open-nmt':
         prepare_subs_for_open_nmt(*args)
@@ -197,6 +256,10 @@ def main(cmd:str, *args):
         generate_sentiment_words(*args)
     elif cmd == 'cut-long-dialogs':
         cut_long_dialogs(*args)
+    elif cmd == 'restructure-taiga-proza-ru-texts':
+        restructure_taiga_proza_ru_texts(*args)
+    elif cmd == 'extract-dialogs-texts':
+        extract_dialogs_texts(*args)
     else:
         raise NotImplementedError
 

@@ -22,7 +22,7 @@ batch_size = 128
 n_first_chars = 3
 
 # models_dir = 'experiments/char-wm/checkpoints'
-models_dir = 'models'
+models_dir = 'models/style-model'
 versions = set([int(f.split('-')[1].split('.')[0]) for f in os.listdir(models_dir) if '-' in f])
 latest_iter = max(versions)
 get_path = lambda m, ext='pth': os.path.join(models_dir, '{}-{}.{}'.format(m, latest_iter, ext))
